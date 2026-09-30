@@ -34,6 +34,8 @@ function carregar(): Banco {
   try {
     const salvo = globalThis.localStorage?.getItem(CHAVE);
     banco = salvo ? { ...vazio(), ...JSON.parse(salvo) } : vazio();
+    // Dados salvos antes do campo `ordem` existir.
+    for (const f of banco!.fichas) f.ordem ??= f.id;
   } catch {
     banco = vazio();
   }
@@ -94,11 +96,12 @@ export const repo: Repositorio = {
       b.fichaExercicios = b.fichaExercicios.filter((fe) => fe.exercicioId !== id);
     }),
 
-  listarFichas: () => ler((b) => [...b.fichas].sort(porNome)),
+  listarFichas: () => ler((b) => [...b.fichas].sort((x, y) => x.ordem - y.ordem || x.id - y.id)),
   obterFicha: (id) => ler((b) => b.fichas.find((f) => f.id === id) ?? null),
   criarFicha: (dados) =>
     escrever((b) => {
-      const ficha = { id: novoId(b), criadaEm: Date.now(), ...dados };
+      const ordem = Math.max(-1, ...b.fichas.map((f) => f.ordem)) + 1;
+      const ficha = { id: novoId(b), ordem, criadaEm: Date.now(), ...dados };
       b.fichas.push(ficha);
       return { ...ficha };
     }),
@@ -108,6 +111,13 @@ export const repo: Repositorio = {
       b.fichas = b.fichas.filter((f) => f.id !== id);
       b.fichaExercicios = b.fichaExercicios.filter((fe) => fe.fichaId !== id);
       for (const s of b.sessoes) if (s.fichaId === id) s.fichaId = null;
+    }),
+  reordenarFichas: (idsNaOrdem) =>
+    escrever((b) => {
+      idsNaOrdem.forEach((id, ordem) => {
+        const f = b.fichas.find((x) => x.id === id);
+        if (f) f.ordem = ordem;
+      });
     }),
 
   listarExerciciosDaFicha: (fichaId) =>
@@ -157,7 +167,8 @@ export const repo: Repositorio = {
   obterSessao: (id) => ler((b) => b.sessoes.find((s) => s.id === id) ?? null),
   obterSessaoAtiva: () =>
     ler((b) => b.sessoes.filter((s) => s.fim === null).sort((x, y) => y.inicio - x.inicio)[0] ?? null),
-  listarSessoes: () => ler((b) => [...b.sessoes].sort((x, y) => y.inicio - x.inicio)),
+  listarSessoes: (desde = 0) =>
+    ler((b) => b.sessoes.filter((s) => s.inicio >= desde).sort((x, y) => y.inicio - x.inicio)),
   removerSessao: (id) =>
     escrever((b) => {
       b.sessoes = b.sessoes.filter((s) => s.id !== id);

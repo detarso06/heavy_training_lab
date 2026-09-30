@@ -58,6 +58,10 @@ const MIGRACOES = [
   CREATE INDEX idx_series_exercicio ON series(exercicio_id, concluida_em);
   CREATE INDEX idx_series_sessao ON series(sessao_id);
   `,
+  `
+  ALTER TABLE fichas ADD COLUMN ordem INTEGER NOT NULL DEFAULT 0;
+  UPDATE fichas SET ordem = id;
+  `,
 ];
 
 let dbPromise: Promise<SQLite.SQLiteDatabase> | null = null;
@@ -82,7 +86,7 @@ function getDb() {
 }
 
 const COLS_EXERCICIO = `id, nome, grupo_muscular AS grupoMuscular, video_url AS videoUrl, observacoes`;
-const COLS_FICHA = `id, nome, descricao, criada_em AS criadaEm`;
+const COLS_FICHA = `id, nome, descricao, ordem, criada_em AS criadaEm`;
 const COLS_SESSAO = `id, ficha_id AS fichaId, nome, inicio, fim`;
 const COLS_SERIE = `id, sessao_id AS sessaoId, exercicio_id AS exercicioId, numero, carga,
   repeticoes, concluida_em AS concluidaEm`;
@@ -147,7 +151,7 @@ export const repo: Repositorio = {
 
   async listarFichas() {
     const db = await getDb();
-    return db.getAllAsync<Ficha>(`SELECT ${COLS_FICHA} FROM fichas ORDER BY nome COLLATE NOCASE`);
+    return db.getAllAsync<Ficha>(`SELECT ${COLS_FICHA} FROM fichas ORDER BY ordem, id`);
   },
   async obterFicha(id) {
     const db = await getDb();
@@ -156,13 +160,16 @@ export const repo: Repositorio = {
   async criarFicha(dados) {
     const db = await getDb();
     const criadaEm = Date.now();
+    const max = await db.getFirstAsync<{ m: number | null }>('SELECT MAX(ordem) AS m FROM fichas');
+    const ordem = (max?.m ?? -1) + 1;
     const r = await db.runAsync(
-      'INSERT INTO fichas (nome, descricao, criada_em) VALUES (?, ?, ?)',
+      'INSERT INTO fichas (nome, descricao, ordem, criada_em) VALUES (?, ?, ?, ?)',
       dados.nome,
       dados.descricao,
+      ordem,
       criadaEm
     );
-    return { id: r.lastInsertRowId, criadaEm, ...dados };
+    return { id: r.lastInsertRowId, ordem, criadaEm, ...dados };
   },
   atualizarFicha(id, dados) {
     return atualizar('fichas', id, dados, { nome: 'nome', descricao: 'descricao' });
@@ -170,6 +177,14 @@ export const repo: Repositorio = {
   async removerFicha(id) {
     const db = await getDb();
     await db.runAsync('DELETE FROM fichas WHERE id = ?', id);
+  },
+  async reordenarFichas(idsNaOrdem) {
+    const db = await getDb();
+    await db.withTransactionAsync(async () => {
+      for (const [ordem, id] of idsNaOrdem.entries()) {
+        await db.runAsync('UPDATE fichas SET ordem = ? WHERE id = ?', ordem, id);
+      }
+    });
   },
 
   async listarExerciciosDaFicha(fichaId) {
@@ -263,9 +278,12 @@ export const repo: Repositorio = {
       `SELECT ${COLS_SESSAO} FROM sessoes WHERE fim IS NULL ORDER BY inicio DESC LIMIT 1`
     );
   },
-  async listarSessoes() {
+  async listarSessoes(desde = 0) {
     const db = await getDb();
-    return db.getAllAsync<Sessao>(`SELECT ${COLS_SESSAO} FROM sessoes ORDER BY inicio DESC`);
+    return db.getAllAsync<Sessao>(
+      `SELECT ${COLS_SESSAO} FROM sessoes WHERE inicio >= ? ORDER BY inicio DESC`,
+      desde
+    );
   },
   async removerSessao(id) {
     const db = await getDb();

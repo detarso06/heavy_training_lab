@@ -14,6 +14,8 @@ export interface Ficha {
   id: Id;
   nome: string;
   descricao: string | null;
+  /** Posição no rodízio semanal (0 = primeira). */
+  ordem: number;
   criadaEm: number;
 }
 
@@ -68,11 +70,14 @@ export interface Repositorio {
   /** Falha se o exercício já tiver séries registradas, para não perder histórico. */
   removerExercicio(id: Id): Promise<void>;
 
+  /** Fichas na ordem do rodízio. */
   listarFichas(): Promise<Ficha[]>;
   obterFicha(id: Id): Promise<Ficha | null>;
   criarFicha(dados: NovaFicha): Promise<Ficha>;
   atualizarFicha(id: Id, dados: Partial<NovaFicha>): Promise<void>;
   removerFicha(id: Id): Promise<void>;
+  /** Recebe os ids das fichas na nova ordem do rodízio. */
+  reordenarFichas(idsNaOrdem: Id[]): Promise<void>;
 
   listarExerciciosDaFicha(fichaId: Id): Promise<FichaExercicioDetalhe[]>;
   adicionarExercicioNaFicha(dados: NovoFichaExercicio): Promise<FichaExercicio>;
@@ -89,7 +94,8 @@ export interface Repositorio {
   obterSessao(id: Id): Promise<Sessao | null>;
   /** Sessão em andamento (sem fim), se houver. */
   obterSessaoAtiva(): Promise<Sessao | null>;
-  listarSessoes(): Promise<Sessao[]>;
+  /** Mais recentes primeiro. `desde` filtra por início >= timestamp. */
+  listarSessoes(desde?: number): Promise<Sessao[]>;
   removerSessao(id: Id): Promise<void>;
 
   registrarSerie(dados: NovaSerie): Promise<Serie>;
