@@ -1,4 +1,7 @@
 // Modelos de dados do app. Datas são timestamps em milissegundos (Date.now()).
+//
+// Hierarquia: Rotina → Ficha (chamada de "treino" na interface) → exercícios planejados.
+// Só uma rotina fica ativa por vez; o rodízio semanal usa as fichas dela.
 
 export type Id = number;
 
@@ -10,13 +13,30 @@ export interface Exercicio {
   observacoes: string | null;
 }
 
-export interface Ficha {
+export interface Rotina {
   id: Id;
   nome: string;
   descricao: string | null;
-  /** Posição no rodízio semanal (0 = primeira). */
+  ativa: boolean;
+  criadaEm: number;
+}
+
+export interface Ficha {
+  id: Id;
+  rotinaId: Id;
+  nome: string;
+  descricao: string | null;
+  /** Posição no rodízio semanal dentro da rotina (0 = primeira). */
   ordem: number;
   criadaEm: number;
+}
+
+export type TipoSerie = 'aquecimento' | 'preparatoria' | 'validas';
+
+export interface PlanoSeries {
+  series: number;
+  /** Texto livre para permitir faixas, ex.: "8-12". */
+  repeticoes: string;
 }
 
 /** Exercício planejado dentro de uma ficha. */
@@ -25,9 +45,9 @@ export interface FichaExercicio {
   fichaId: Id;
   exercicioId: Id;
   ordem: number;
-  series: number;
-  /** Texto livre para permitir faixas, ex.: "8-12". */
-  repeticoes: string;
+  aquecimento: PlanoSeries;
+  preparatoria: PlanoSeries;
+  validas: PlanoSeries;
   descansoSeg: number;
 }
 
@@ -51,14 +71,34 @@ export interface Serie {
   id: Id;
   sessaoId: Id;
   exercicioId: Id;
+  /** Posição da série dentro do exercício no treino (1, 2, 3...), contando todos os tipos. */
   numero: number;
+  tipo: TipoSerie;
   carga: number;
   repeticoes: number;
   concluidaEm: number;
 }
 
+/** Dados do usuário (registro único). Campos nulos = ainda não preenchidos. */
+export interface Perfil {
+  nome: string | null;
+  idade: number | null;
+  alturaCm: number | null;
+  pesoKg: number | null;
+  /** Atividade de cardio da meta, ex.: "Escada". */
+  cardioAtividade: string | null;
+  metaCardioMin: number | null;
+  metaAguaMl: number | null;
+  /** Id do rosto do Heavy Guy escolhido (ver src/lib/avatares.ts). */
+  avatar: string | null;
+}
+
+/** Cardio é acumulado por semana; água, por dia. */
+export type TipoMeta = 'cardio' | 'agua';
+
 export type NovoExercicio = Omit<Exercicio, 'id'>;
-export type NovaFicha = Pick<Ficha, 'nome' | 'descricao'>;
+export type NovaRotina = Pick<Rotina, 'nome' | 'descricao'>;
+export type NovaFicha = Pick<Ficha, 'rotinaId' | 'nome' | 'descricao'>;
 export type NovoFichaExercicio = Omit<FichaExercicio, 'id' | 'ordem'>;
 export type NovaSerie = Omit<Serie, 'id' | 'concluidaEm'>;
 
@@ -70,11 +110,23 @@ export interface Repositorio {
   /** Falha se o exercício já tiver séries registradas, para não perder histórico. */
   removerExercicio(id: Id): Promise<void>;
 
-  /** Fichas na ordem do rodízio. */
-  listarFichas(): Promise<Ficha[]>;
+  /** Mais antigas primeiro. */
+  listarRotinas(): Promise<Rotina[]>;
+  obterRotina(id: Id): Promise<Rotina | null>;
+  obterRotinaAtiva(): Promise<Rotina | null>;
+  /** A primeira rotina criada já nasce ativa. */
+  criarRotina(dados: NovaRotina): Promise<Rotina>;
+  atualizarRotina(id: Id, dados: Partial<NovaRotina>): Promise<void>;
+  /** Desativa as demais. */
+  ativarRotina(id: Id): Promise<void>;
+  /** Apaga as fichas dela; o histórico de sessões continua. Se era a ativa, ativa outra. */
+  removerRotina(id: Id): Promise<void>;
+
+  /** Fichas da rotina na ordem do rodízio. */
+  listarFichas(rotinaId: Id): Promise<Ficha[]>;
   obterFicha(id: Id): Promise<Ficha | null>;
   criarFicha(dados: NovaFicha): Promise<Ficha>;
-  atualizarFicha(id: Id, dados: Partial<NovaFicha>): Promise<void>;
+  atualizarFicha(id: Id, dados: Partial<Pick<Ficha, 'nome' | 'descricao'>>): Promise<void>;
   removerFicha(id: Id): Promise<void>;
   /** Recebe os ids das fichas na nova ordem do rodízio. */
   reordenarFichas(idsNaOrdem: Id[]): Promise<void>;
@@ -83,7 +135,7 @@ export interface Repositorio {
   adicionarExercicioNaFicha(dados: NovoFichaExercicio): Promise<FichaExercicio>;
   atualizarExercicioDaFicha(
     id: Id,
-    dados: Partial<Pick<FichaExercicio, 'series' | 'repeticoes' | 'descansoSeg'>>
+    dados: Partial<Pick<FichaExercicio, TipoSerie | 'descansoSeg'>>
   ): Promise<void>;
   removerExercicioDaFicha(id: Id): Promise<void>;
   /** Recebe os ids de ficha_exercicios na nova ordem. */
@@ -104,7 +156,29 @@ export interface Repositorio {
   listarSeriesDaSessao(sessaoId: Id): Promise<Serie[]>;
   /**
    * Séries do exercício na sessão encerrada mais recente em que ele foi feito.
-   * Usado para preencher a carga do último treino.
+   * Usado para preencher a carga do último treino e comparar a evolução no resumo
+   * (`ignorarSessaoId` deixa de fora a sessão que acabou de terminar).
    */
-  ultimasSeriesDoExercicio(exercicioId: Id): Promise<Serie[]>;
+  ultimasSeriesDoExercicio(exercicioId: Id, ignorarSessaoId?: Id): Promise<Serie[]>;
+
+
+  /** Grava uma sessão já concluída, com data no passado (dados de teste, importação). */
+  importarSessao(dados: {
+    fichaId: Id | null;
+    nome: string;
+    inicio: number;
+    fim: number;
+    series: Omit<Serie, 'id' | 'sessaoId'>[];
+  }): Promise<Sessao>;
+  /** Apaga exercícios, rotinas, treinos, sessões, séries e progresso das metas. Mantém o perfil. */
+  apagarDadosDeTreino(): Promise<void>;
+
+  obterPerfil(): Promise<Perfil>;
+  salvarPerfil(dados: Partial<Perfil>): Promise<void>;
+  /**
+   * Quanto já foi feito da meta no período (cardio em minutos, água em ml).
+   * `periodo` é a data "AAAA-MM-DD" da segunda-feira (cardio) ou do dia (água); 0 se nada registrado.
+   */
+  obterProgresso(tipo: TipoMeta, periodo: string): Promise<number>;
+  salvarProgresso(tipo: TipoMeta, periodo: string, valor: number): Promise<void>;
 }

@@ -1,31 +1,50 @@
 @AGENTS.md
 
-# App Treino
+# Heavy Training Lab
 
 App pessoal de treino (por enquanto só o dono usa). Comunicação com o usuário em **português**.
+Antigo "App Treino": o repositório no GitHub e a pasta local ainda se chamam `app-treino`, e as chaves de armazenamento (`app-treino:v1`, `treino.db`) foram mantidas para não perder dados.
+
+## Identidade visual
+- Mascote **Heavy Guy** (rosto de gorro, suando, com raios dourados). O ícone, o splash e `assets/images/mascote.png` vêm do rosto; os originais estão em `C:\Users\pauli\Downloads` (versão atual do rosto: "Grito Retrô Sob o Gorro.png"; pôsteres "Heavy Guy").
+- **Avatar do perfil**: 13 opções em `src/lib/avatares.ts` ("Clássico" = `mascote.png`, padrão, + 12 expressões recortadas da folha de figurinhas, original em Downloads "WhatsApp Image 2026-10-05 at 19.05.15.jpeg", em `assets/images/avatares/`). Escolha salva em `perfil.avatar`; `useAvatarAtual` mantém cabeçalho e aba Usuário sincronizados.
+- App sempre escuro. Paleta em `src/lib/tema.ts`: preto, **vermelho** (ação principal), **dourado** (destaques, contadores, botões secundários) e branco creme (texto). Use `CORES`, nunca cores soltas.
+- Confirmações (apagar/remover) usam a janela do próprio app, `useConfirmacao` em `src/components/dialogo-confirmacao.tsx`, mostrando o nome do item em destaque. Não usar `Alert`/`window.confirm`.
 
 ## Como rodamos
 - Desenvolvimento no navegador: `npx expo start --web --port 8081` → http://localhost:8081, com o DevTools em modo dispositivo (dimensões de iPhone). O usuário tem iPhone; teste real será pelo Expo Go.
 - Antes de concluir uma tarefa: `npx tsc --noEmit` e `npx expo lint`.
+- **Dados de teste**: em modo de desenvolvimento (`__DEV__`), o fim da aba Usuário tem "Preencher com dados de teste" (`src/lib/dados-de-teste.ts`). Apaga rotinas/treinos/histórico e cria 2 rotinas, ~53 treinos em 2 meses com carga subindo e sequência de 23 dias terminando ontem; mantém perfil e catálogo.
+- **Publicação (web app)**: `npm run publicar` exporta a versão web (`dist/`) e publica no EAS Hosting (endereço `heavy-training-lab.expo.app`). Precisa de `npx eas-cli@latest login` na conta Expo do usuário. `public/index.html` + `public/manifest.json` + ícones em `public/` fazem o "Adicionar à Tela de Início" funcionar como app. Cada pessoa guarda o próprio histórico no navegador (sem servidor ainda).
 - GitHub: https://github.com/detarso06/app-treino (privado, branch `main`). A conta também pertence à organização da empresa do usuário — nunca criar nem alterar nada fora de `detarso06/app-treino`.
 - O `gh` fica em `C:\Program Files\GitHub CLI\gh.exe` (pode não estar no PATH).
 
 ## Arquitetura
-- Expo Router com menu lateral (drawer) em `src/app/_layout.tsx`: Início, Usuário, Treinos, Evolução.
+- Expo Router com menu lateral (drawer) em `src/app/_layout.tsx`: Início, Usuário, Treinos, Evolução. Treinos e Evolução têm pilha própria (`_layout.tsx` com `BotaoMenu`).
 - Dados: interface `Repositorio` em `src/db/types.ts`, com duas implementações:
   - `src/db/index.ts` — SQLite (celular), migrações em `MIGRACOES` via `PRAGMA user_version`. Nunca editar uma migração existente; sempre adicionar uma nova.
   - `src/db/index.web.ts` — localStorage (web). Deve se comportar igual à versão SQLite.
 - Regras de negócio puras em `src/lib/` (ex.: `rodizio.ts`).
 
 ## Regras de negócio já decididas
-- **Treino do dia = rodízio semanal.** Reinicia toda segunda 00:00 (horário local). Sugere a primeira ficha (por `ordem`) ainda não concluída na semana, mesmo que o usuário treine fora de ordem (fez A e C → sugere B). Só sessões encerradas contam. No futuro o usuário poderá escolher outra ficha no dia, mas a sugestão segue o rodízio.
-- **Última carga**: vem da sessão encerrada mais recente em que o exercício foi feito.
+- **Rotina → Treino → Exercícios.** O usuário cria rotinas (ex.: "ABC") e, dentro delas, treinos. No código o treino se chama `Ficha`. Só uma rotina fica ativa; a primeira criada já nasce ativa e o rodízio usa os treinos dela.
+- **Séries planejadas por tipo**: aquecimento, preparatória e válidas, cada uma com quantidade e repetições (texto livre, ex.: "8-12"), mais descanso por exercício.
+- **Catálogo de exercícios**: lista própria em português em `src/lib/catalogo.ts` (9 grupos, ~20 exercícios cada; Panturrilhas tem 10). Sem API: a wger foi abandonada porque os nomes vinham em inglês (sobrou só a coluna `wger_id` sem uso no SQLite). O exercício só é gravado em `exercicios` quando usado num treino (`obterOuCriarExercicio`, sem duplicar pelo nome). Se nenhum servir, o usuário cria um com o nome que quiser ("Personalizado").
+- **Treino do dia = rodízio semanal.** Reinicia toda segunda 00:00 (horário local). Sugere a primeira ficha (por `ordem`) ainda não concluída na semana, mesmo que o usuário treine fora de ordem (fez A e C → sugere B). Só sessões encerradas contam. No Início, "Trocar treino" deixa escolher outro treino da rotina para hoje (só para o próximo início de sessão; não é salvo); a sugestão continua seguindo o rodízio.
+- **Sessão de treino** (`src/app/treinos/sessao/[id].tsx`, regras em `src/lib/sessao.ts`): iniciada pelo botão do Início após confirmação (se já houver sessão aberta, o botão vira "Continuar treino"). Mostra **um exercício por vez** (setas ‹ › e "Exercício N de M"; abre no primeiro com série pendente; ao completar um, aparece "Próximo: …"). Cada série planejada vira uma linha com peso e reps editáveis e um ✓ que grava a `Serie` (com `tipo`); tocar de novo no ✓ desfaz; editar uma série já confirmada salva ao sair do campo. Confirmar uma série inicia o timer de descanso do exercício (pausar, reiniciar, +15s, pular). Finalizar exige pelo menos 1 série; com séries pendentes pede confirmação. "Descartar treino" apaga a sessão.
+- **Resumo** (`src/app/treinos/resumo/[id].tsx`): Heavy Guy piscando (avatar-04), duração, séries, repetições, peso total (Σ carga × reps, todas as séries) e evolução por exercício vs. a última sessão em que ele foi feito, olhando as séries válidas: primeiro carga máxima, depois volume.
+- **Evolução** (`src/app/evolucao/`, regras em `src/lib/evolucao.ts`): filtro de rotina (padrão = a ativa; mostra todas as que o usuário já teve) → lista de treinos → um gráfico de linha por exercício com a **carga máxima das séries válidas** de cada sessão concluída daquele treino (`react-native-svg`). Tocar num ponto mostra a data e cada série válida; "Ver todos os treinos" abre a tabela. Sessões cujo treino foi apagado não aparecem.
+- **Última carga**: vem da sessão encerrada mais recente em que o exercício foi feito; na sessão, cada linha é pré-preenchida com a mesma série (mesmo tipo e posição) da última vez, e as reps caem para o primeiro número do alvo planejado.
 - Exercício com séries registradas não pode ser apagado; apagar ficha mantém o histórico de sessões (com o nome da ficha).
+- **Perfil (aba Usuário)**: nome, idade, altura, peso atual e as metas — cardio semanal (atividade + minutos) e água diária (ml). O Heavy Guy no canto do cabeçalho do Início abre essa aba.
+- **Sequência (painel Início)**: dias seguidos do calendário com pelo menos uma sessão **concluída** (`src/lib/sequencia.ts`). Se hoje ainda não teve treino, a sequência de ontem vale até o fim do dia; um dia inteiro sem treino zera. Decisão: dias do calendário, não 24h corridas (pedido original falava em "24 horas"). Níveis em `nivelDaSequencia`: 0 Frio 🧊, 1+ Aquecendo 🔥, 3+ Pegando fogo 🔥🔥, 7+ Em chamas 🔥🔥🔥, 14+ Imparável ☄️, 30+ Lendário 🌋.
+  - Futuro: cada nível terá uma imagem própria do Heavy Guy, e ao zerar a sequência ele volta à imagem inicial.
+- **Metas no painel Início**: o usuário arrasta uma barra (`BarraArrastavel`) de 0 até a meta para dizer quanto já fez. O valor é absoluto, não soma. Cardio vale por semana (período = segunda-feira, como o rodízio) e água por dia; cada período fica salvo em `progresso_metas` (histórico para a Evolução).
 
 ## Funcionalidades pedidas (visão geral)
 Montar fichas; iniciar/encerrar sessão; registrar séries (carga/reps) com a última carga salva; timer de descanso; cronômetro da sessão; link para vídeo de execução de cada exercício; resumo ao concluir; informações por série.
 
 ## Próximos passos / pendências
-- Próximo: aba **Treinos** — criar fichas, ordenar o rodízio, adicionar exercícios (vídeo, séries, reps, descanso). Sugestão: fazer em branch `feature/fichas`.
-- Botão "Iniciar sessão de treino" ainda só navega para `/treinos` (tela de sessão não existe).
-- Perguntar ao usuário: o que a aba Usuário guarda; o que a Evolução mostra; o que sugerir depois de "Semana concluída".
+- Aba **Treinos** feita na branch `feature/fichas` (rotinas, treinos, seletor do catálogo, séries por tipo, vídeo).
+- Futuro: enviar um treino para outro usuário copiar (modo "personal").
+- Perguntar ao usuário: o que sugerir depois de "Semana concluída".

@@ -5,7 +5,9 @@ import type {
   Ficha,
   FichaExercicio,
   Id,
+  Perfil,
   Repositorio,
+  Rotina,
   Serie,
   Sessao,
 } from './types';
@@ -13,18 +15,79 @@ import type {
 export * from './types';
 
 const CHAVE = 'app-treino:v1';
+// Cache do antigo catálogo da wger: apagado ao carregar.
+const CHAVE_CATALOGO_ANTIGO = 'app-treino:catalogo';
 
 interface Banco {
   seq: number;
   exercicios: Exercicio[];
+  rotinas: Rotina[];
   fichas: Ficha[];
   fichaExercicios: FichaExercicio[];
   sessoes: Sessao[];
   series: Serie[];
+  perfil: Perfil;
+  /** Chave "tipo:periodo", ex.: "agua:2026-10-05". */
+  progresso: Record<string, number>;
 }
 
 function vazio(): Banco {
-  return { seq: 0, exercicios: [], fichas: [], fichaExercicios: [], sessoes: [], series: [] };
+  return {
+    seq: 0,
+    exercicios: [],
+    rotinas: [],
+    fichas: [],
+    fichaExercicios: [],
+    sessoes: [],
+    series: [],
+    perfil: perfilVazio(),
+    progresso: {},
+  };
+}
+
+function perfilVazio(): Perfil {
+  return {
+    nome: null,
+    idade: null,
+    alturaCm: null,
+    pesoKg: null,
+    cardioAtividade: null,
+    metaCardioMin: null,
+    metaAguaMl: null,
+    avatar: null,
+  };
+}
+
+/** Converte dados salvos por versões anteriores, como as migrações do SQLite. */
+function migrar(b: Banco) {
+  for (const f of b.fichas) f.ordem ??= f.id;
+
+  const semRotina = b.fichas.filter((f) => f.rotinaId == null);
+  if (semRotina.length > 0) {
+    const rotina: Rotina = {
+      id: ++b.seq,
+      nome: 'Minha rotina',
+      descricao: null,
+      ativa: b.rotinas.length === 0,
+      criadaEm: Date.now(),
+    };
+    b.rotinas.push(rotina);
+    for (const f of semRotina) f.rotinaId = rotina.id;
+  }
+
+  for (const fe of b.fichaExercicios) {
+    const antigo = fe as FichaExercicio & { series?: number; repeticoes?: string };
+    if (antigo.validas) continue;
+    fe.validas = { series: antigo.series ?? 0, repeticoes: antigo.repeticoes ?? '' };
+    fe.aquecimento = { series: 0, repeticoes: '' };
+    fe.preparatoria = { series: 0, repeticoes: '' };
+    delete antigo.series;
+    delete antigo.repeticoes;
+  }
+
+  for (const e of b.exercicios) delete (e as Exercicio & { wgerId?: unknown }).wgerId;
+  for (const s of b.series) s.tipo ??= 'validas';
+  b.perfil = { ...perfilVazio(), ...b.perfil };
 }
 
 let banco: Banco | null = null;
@@ -34,8 +97,8 @@ function carregar(): Banco {
   try {
     const salvo = globalThis.localStorage?.getItem(CHAVE);
     banco = salvo ? { ...vazio(), ...JSON.parse(salvo) } : vazio();
-    // Dados salvos antes do campo `ordem` existir.
-    for (const f of banco!.fichas) f.ordem ??= f.id;
+    migrar(banco!);
+    globalThis.localStorage?.removeItem(CHAVE_CATALOGO_ANTIGO);
   } catch {
     banco = vazio();
   }
@@ -78,6 +141,12 @@ function atualizarItem<T extends { id: Id }>(lista: T[], id: Id, dados: object) 
   }
 }
 
+function removerFichas(b: Banco, ids: Set<Id>) {
+  b.fichas = b.fichas.filter((f) => !ids.has(f.id));
+  b.fichaExercicios = b.fichaExercicios.filter((fe) => !ids.has(fe.fichaId));
+  for (const s of b.sessoes) if (s.fichaId !== null && ids.has(s.fichaId)) s.fichaId = null;
+}
+
 export const repo: Repositorio = {
   listarExercicios: () => ler((b) => [...b.exercicios].sort(porNome)),
   criarExercicio: (dados) =>
@@ -96,22 +165,45 @@ export const repo: Repositorio = {
       b.fichaExercicios = b.fichaExercicios.filter((fe) => fe.exercicioId !== id);
     }),
 
-  listarFichas: () => ler((b) => [...b.fichas].sort((x, y) => x.ordem - y.ordem || x.id - y.id)),
+  listarRotinas: () =>
+    ler((b) => [...b.rotinas].sort((x, y) => x.criadaEm - y.criadaEm || x.id - y.id)),
+  obterRotina: (id) => ler((b) => b.rotinas.find((r) => r.id === id) ?? null),
+  obterRotinaAtiva: () => ler((b) => b.rotinas.find((r) => r.ativa) ?? null),
+  criarRotina: (dados) =>
+    escrever((b) => {
+      const rotina = { id: novoId(b), ativa: b.rotinas.length === 0, criadaEm: Date.now(), ...dados };
+      b.rotinas.push(rotina);
+      return { ...rotina };
+    }),
+  atualizarRotina: (id, dados) => escrever((b) => atualizarItem(b.rotinas, id, dados)),
+  ativarRotina: (id) =>
+    escrever((b) => {
+      for (const r of b.rotinas) r.ativa = r.id === id;
+    }),
+  removerRotina: (id) =>
+    escrever((b) => {
+      b.rotinas = b.rotinas.filter((r) => r.id !== id);
+      removerFichas(b, new Set(b.fichas.filter((f) => f.rotinaId === id).map((f) => f.id)));
+      if (b.rotinas.length > 0 && !b.rotinas.some((r) => r.ativa)) {
+        const primeira = [...b.rotinas].sort((x, y) => x.criadaEm - y.criadaEm || x.id - y.id)[0];
+        primeira.ativa = true;
+      }
+    }),
+
+  listarFichas: (rotinaId) =>
+    ler((b) =>
+      b.fichas.filter((f) => f.rotinaId === rotinaId).sort((x, y) => x.ordem - y.ordem || x.id - y.id)
+    ),
   obterFicha: (id) => ler((b) => b.fichas.find((f) => f.id === id) ?? null),
   criarFicha: (dados) =>
     escrever((b) => {
-      const ordem = Math.max(-1, ...b.fichas.map((f) => f.ordem)) + 1;
-      const ficha = { id: novoId(b), ordem, criadaEm: Date.now(), ...dados };
+      const ordens = b.fichas.filter((f) => f.rotinaId === dados.rotinaId).map((f) => f.ordem);
+      const ficha = { id: novoId(b), ordem: Math.max(-1, ...ordens) + 1, criadaEm: Date.now(), ...dados };
       b.fichas.push(ficha);
       return { ...ficha };
     }),
   atualizarFicha: (id, dados) => escrever((b) => atualizarItem(b.fichas, id, dados)),
-  removerFicha: (id) =>
-    escrever((b) => {
-      b.fichas = b.fichas.filter((f) => f.id !== id);
-      b.fichaExercicios = b.fichaExercicios.filter((fe) => fe.fichaId !== id);
-      for (const s of b.sessoes) if (s.fichaId === id) s.fichaId = null;
-    }),
+  removerFicha: (id) => escrever((b) => removerFichas(b, new Set([id]))),
   reordenarFichas: (idsNaOrdem) =>
     escrever((b) => {
       idsNaOrdem.forEach((id, ordem) => {
@@ -133,12 +225,12 @@ export const repo: Repositorio = {
   adicionarExercicioNaFicha: (dados) =>
     escrever((b) => {
       const ordens = b.fichaExercicios.filter((fe) => fe.fichaId === dados.fichaId).map((fe) => fe.ordem);
-      const fe = { id: novoId(b), ordem: Math.max(-1, ...ordens) + 1, ...dados };
+      const fe = { id: novoId(b), ordem: Math.max(-1, ...ordens) + 1, ...structuredClone(dados) };
       b.fichaExercicios.push(fe);
-      return { ...fe };
+      return structuredClone(fe);
     }),
   atualizarExercicioDaFicha: (id, dados) =>
-    escrever((b) => atualizarItem(b.fichaExercicios, id, dados)),
+    escrever((b) => atualizarItem(b.fichaExercicios, id, structuredClone(dados))),
   removerExercicioDaFicha: (id) =>
     escrever((b) => {
       b.fichaExercicios = b.fichaExercicios.filter((fe) => fe.id !== id);
@@ -188,12 +280,47 @@ export const repo: Repositorio = {
     }),
   listarSeriesDaSessao: (sessaoId) =>
     ler((b) => b.series.filter((s) => s.sessaoId === sessaoId).sort((x, y) => x.concluidaEm - y.concluidaEm)),
-  ultimasSeriesDoExercicio: (exercicioId) =>
+  ultimasSeriesDoExercicio: (exercicioId, ignorarSessaoId) =>
     ler((b) => {
-      const encerradas = new Set(b.sessoes.filter((s) => s.fim !== null).map((s) => s.id));
+      const encerradas = new Set(
+        b.sessoes.filter((s) => s.fim !== null && s.id !== ignorarSessaoId).map((s) => s.id)
+      );
       const doExercicio = b.series.filter((s) => s.exercicioId === exercicioId && encerradas.has(s.sessaoId));
       if (doExercicio.length === 0) return [];
       const ultima = doExercicio.reduce((a, s) => (s.concluidaEm > a.concluidaEm ? s : a));
       return doExercicio.filter((s) => s.sessaoId === ultima.sessaoId).sort((x, y) => x.numero - y.numero);
+    }),
+
+  importarSessao: ({ series, ...dados }) =>
+    escrever((b) => {
+      const sessao: Sessao = { id: novoId(b), ...dados };
+      b.sessoes.push(sessao);
+      for (const s of series) b.series.push({ id: novoId(b), sessaoId: sessao.id, ...s });
+      return { ...sessao };
+    }),
+  apagarDadosDeTreino: () =>
+    escrever((b) => {
+      Object.assign(b, {
+        exercicios: [],
+        rotinas: [],
+        fichas: [],
+        fichaExercicios: [],
+        sessoes: [],
+        series: [],
+        progresso: {},
+      });
+    }),
+
+  obterPerfil: () => ler((b) => b.perfil),
+  salvarPerfil: (dados) =>
+    escrever((b) => {
+      for (const [k, v] of Object.entries(dados)) {
+        if (v !== undefined) (b.perfil as unknown as Record<string, unknown>)[k] = v;
+      }
+    }),
+  obterProgresso: (tipo, periodo) => ler((b) => b.progresso[`${tipo}:${periodo}`] ?? 0),
+  salvarProgresso: (tipo, periodo, valor) =>
+    escrever((b) => {
+      b.progresso[`${tipo}:${periodo}`] = valor;
     }),
 };
