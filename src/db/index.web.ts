@@ -60,7 +60,10 @@ function perfilVazio(): Perfil {
 
 /** Converte dados salvos por versões anteriores, como as migrações do SQLite. */
 function migrar(b: Banco) {
-  for (const f of b.fichas) f.ordem ??= f.id;
+  for (const f of b.fichas) {
+    f.ordem ??= f.id;
+    f.descanso ??= false;
+  }
 
   const semRotina = b.fichas.filter((f) => f.rotinaId == null);
   if (semRotina.length > 0) {
@@ -198,7 +201,13 @@ export const repo: Repositorio = {
   criarFicha: (dados) =>
     escrever((b) => {
       const ordens = b.fichas.filter((f) => f.rotinaId === dados.rotinaId).map((f) => f.ordem);
-      const ficha = { id: novoId(b), ordem: Math.max(-1, ...ordens) + 1, criadaEm: Date.now(), ...dados };
+      const ficha: Ficha = {
+        id: novoId(b),
+        ordem: Math.max(-1, ...ordens) + 1,
+        criadaEm: Date.now(),
+        ...dados,
+        descanso: dados.descanso ?? false,
+      };
       b.fichas.push(ficha);
       return { ...ficha };
     }),

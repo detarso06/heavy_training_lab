@@ -6,7 +6,7 @@ import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from
 import { Cartao, CriarComNome, Selo } from '@/components/ui';
 import { repo, type Rotina } from '@/db';
 
-type RotinaComTotal = Rotina & { totalTreinos: number };
+type RotinaComTotal = Rotina & { totalTreinos: number; totalDescansos: number };
 
 export default function Rotinas() {
   const { colors } = useTheme();
@@ -18,7 +18,11 @@ export default function Rotinas() {
       (async () => {
         const lista = await repo.listarRotinas();
         const comTotal = await Promise.all(
-          lista.map(async (r) => ({ ...r, totalTreinos: (await repo.listarFichas(r.id)).length }))
+          lista.map(async (r) => {
+            const fichas = await repo.listarFichas(r.id);
+            const totalDescansos = fichas.filter((f) => f.descanso).length;
+            return { ...r, totalTreinos: fichas.length - totalDescansos, totalDescansos };
+          })
         );
         if (ativo) setRotinas(comTotal);
       })();
@@ -57,6 +61,8 @@ export default function Rotinas() {
                 </View>
                 <Text style={[styles.detalhe, { color: colors.text }]}>
                   {r.totalTreinos === 1 ? '1 treino' : `${r.totalTreinos} treinos`}
+                  {r.totalDescansos > 0 &&
+                    ` · ${r.totalDescansos === 1 ? '1 descanso' : `${r.totalDescansos} descansos`}`}
                 </Text>
               </View>
               <Ionicons name="chevron-forward" size={20} color={colors.text} />

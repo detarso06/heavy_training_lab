@@ -10,7 +10,7 @@ import { SeletorTreino } from '@/components/seletor-treino';
 import { useConfirmacao } from '@/components/dialogo-confirmacao';
 import { repo, type Ficha, type Perfil, type Rotina, type Sessao } from '@/db';
 import { formatarLitros, formatarMinutos, periodoDaAgua, periodoDoCardio } from '@/lib/metas';
-import { calcularTreinoDoDia, inicioDaSemana, type TreinoDoDia } from '@/lib/rodizio';
+import { calcularTreinoDoDia, descansoDeHoje, inicioDaSemana, treinoDeHoje, type TreinoDoDia } from '@/lib/rodizio';
 import { calcularSequencia, type Sequencia } from '@/lib/sequencia';
 import { CORES } from '@/lib/tema';
 
@@ -22,6 +22,10 @@ interface Dados {
   sequencia: Sequencia;
   /** Treino iniciado e ainda não finalizado. */
   sessaoAtiva: Sessao | null;
+  /** "Descansei hoje" já marcado. */
+  descansoHoje: Sessao | null;
+  /** Treino concluído hoje (o mais recente). */
+  treinoHoje: Sessao | null;
 }
 
 export default function Inicio() {
@@ -35,64 +39,140 @@ export default function Inicio() {
   const [escolhida, setEscolhida] = useState<number | null>(null);
   const [trocando, setTrocando] = useState(false);
 
+  /** `aindaAtivo` evita gravar estado depois que a tela perdeu o foco. */
+  const carregar = useCallback(async (aindaAtivo: () => boolean = () => true) => {
+    const hoje = new Date();
+    const p = { cardio: periodoDoCardio(hoje), agua: periodoDaAgua(hoje) };
+    const rotina = await repo.obterRotinaAtiva();
+    const [fichas, todasSessoes, perfil, feitoCardio, feitoAgua, sessaoAtiva] = await Promise.all([
+      rotina ? repo.listarFichas(rotina.id) : Promise.resolve([]),
+      repo.listarSessoes(),
+      repo.obterPerfil(),
+      repo.obterProgresso('cardio', p.cardio),
+      repo.obterProgresso('agua', p.agua),
+      repo.obterSessaoAtiva(),
+    ]);
+    if (!aindaAtivo()) return;
+    const daSemana = todasSessoes.filter((s) => s.inicio >= inicioDaSemana(hoje));
+    setDados({
+      rotina,
+      fichas,
+      treino: calcularTreinoDoDia(fichas, daSemana),
+      perfil,
+      sequencia: calcularSequencia(todasSessoes, hoje),
+      sessaoAtiva,
+      descansoHoje: descansoDeHoje(fichas, todasSessoes, hoje),
+      treinoHoje: treinoDeHoje(fichas, todasSessoes, hoje),
+    });
+    setPeriodos(p);
+    setCardio(feitoCardio);
+    setAgua(feitoAgua);
+  }, []);
+
   // Recarrega sempre que a tela volta ao foco (ex.: depois de criar treino ou mudar metas).
   useFocusEffect(
     useCallback(() => {
       let ativo = true;
-      (async () => {
-        const hoje = new Date();
-        const p = { cardio: periodoDoCardio(hoje), agua: periodoDaAgua(hoje) };
-        const rotina = await repo.obterRotinaAtiva();
-        const [fichas, todasSessoes, perfil, feitoCardio, feitoAgua, sessaoAtiva] = await Promise.all([
-          rotina ? repo.listarFichas(rotina.id) : Promise.resolve([]),
-          repo.listarSessoes(),
-          repo.obterPerfil(),
-          repo.obterProgresso('cardio', p.cardio),
-          repo.obterProgresso('agua', p.agua),
-          repo.obterSessaoAtiva(),
-        ]);
-        if (!ativo) return;
-        const daSemana = todasSessoes.filter((s) => s.inicio >= inicioDaSemana(hoje));
-        setDados({
-          rotina,
-          fichas,
-          treino: calcularTreinoDoDia(fichas, daSemana),
-          perfil,
-          sequencia: calcularSequencia(todasSessoes, hoje),
-          sessaoAtiva,
-        });
-        setPeriodos(p);
-        setCardio(feitoCardio);
-        setAgua(feitoAgua);
-      })();
+      carregar(() => ativo);
       return () => {
         ativo = false;
       };
-    }, [])
+    }, [carregar])
   );
 
   if (!dados) return <ActivityIndicator style={styles.carregando} />;
 
-  const { rotina, fichas, treino, perfil, sequencia, sessaoAtiva } = dados;
+  const { rotina, fichas, treino, perfil, sequencia, sessaoAtiva, descansoHoje, treinoHoje } = dados;
   const semFichas = fichas.length === 0;
+  const treinos = fichas.filter((f) => !f.descanso);
+  /** Próximo treino de verdade (pula descansos); semana concluída: o primeiro, como extra. */
+  const proximoTreino = treinos.find((f) => !treino.feitasNaSemana.has(f.id)) ?? treinos[0] ?? null;
 
   const fichaEscolhida = fichas.find((f) => f.id === escolhida) ?? null;
-  /** Treino que o botão vai iniciar. Semana concluída: oferece o primeiro do rodízio como extra. */
-  const fichaDoDia = fichaEscolhida ?? treino.ficha ?? fichas[0];
-  const trocou = fichaEscolhida !== null && fichaEscolhida.id !== treino.ficha?.id;
+  /** Já descansou hoje e não escolheu outro: o botão oferece treinar mesmo assim. */
+  const descansando = descansoHoje !== null && !fichaEscolhida && !sessaoAtiva;
+  /** Já treinou hoje (e não escolheu outro): mostra "Treino do dia feito" e oferece o próximo. */
+  const treinou = treinoHoje !== null && !descansando && !fichaEscolhida && !sessaoAtiva;
+  /** Item do rodízio que o botão vai iniciar (ou marcar, se for descanso). */
+  const fichaDoDia =
+    descansando || treinou ? proximoTreino : (fichaEscolhida ?? treino.ficha ?? proximoTreino ?? fichas[0]);
+  const ehDescanso = !sessaoAtiva && !treinou && !!fichaDoDia?.descanso;
 
   let destaque = fichaDoDia?.nome;
   if (sessaoAtiva) destaque = sessaoAtiva.nome;
   else if (semFichas) destaque = 'Nenhum treino cadastrado';
+  else if (descansando) destaque = 'Descanso feito';
+  else if (treinou) destaque = 'Treino do dia feito!';
+  else if (ehDescanso) destaque = 'Dia de descanso';
   else if (treino.semanaCompleta && !fichaEscolhida) destaque = 'Semana concluída!';
+
+  // Heavy Guy do painel: se preparando enquanto o treino de hoje não foi feito; dormindo depois do treino ou no descanso.
+  let ilustracao: { imagem: number; proporcao: number; descricao: string } | null = null;
+  if (ehDescanso || descansando) {
+    ilustracao = {
+      imagem: require('@/../assets/images/descanso.png'),
+      proporcao: 800 / 723,
+      descricao: 'Heavy Guy dormindo e sonhando com o agachamento',
+    };
+  } else if (treinou) {
+    ilustracao = {
+      imagem: require('@/../assets/images/descanso.png'),
+      proporcao: 800 / 723,
+      descricao: 'Heavy Guy dormindo depois do treino, sonhando com o agachamento',
+    };
+  } else if (!sequencia.treinouHoje) {
+    ilustracao = {
+      imagem: require('@/../assets/images/treino-pendente.png'),
+      proporcao: 800 / 733,
+      descricao: 'Heavy Guy no vestiário enfaixando o punho, pronto para treinar',
+    };
+  }
+
+  // No "Trocar treino" os descansos aparecem uma vez só (o próximo pendente), e nenhum se já descansou hoje.
+  const descansoOpcao = descansoHoje
+    ? null
+    : treino.ficha?.descanso
+      ? treino.ficha
+      : fichas.find((f) => f.descanso && !treino.feitasNaSemana.has(f.id));
+  const opcoesTroca = fichas.filter((f) => !f.descanso || f.id === descansoOpcao?.id);
 
   const abrirSessao = (id: number) =>
     router.push({ pathname: '/treinos/sessao/[id]', params: { id: String(id) } });
 
+  const marcarDescanso = async (id: number) => {
+    const ok = await confirmar({
+      titulo: 'Dia de descanso',
+      destaque: 'Descansei hoje',
+      mensagem: 'Conta na sua sequência, e o rodízio passa para o próximo treino.',
+      textoConfirmar: 'Marcar',
+      icone: 'bed-outline',
+    });
+    if (!ok) return;
+    const agora = Date.now();
+    await repo.importarSessao({ fichaId: id, nome: 'Descanso', inicio: agora, fim: agora, series: [] });
+    setEscolhida(null);
+    await carregar();
+  };
+
+  const desfazerDescanso = async () => {
+    if (!descansoHoje) return;
+    const ok = await confirmar({
+      titulo: 'Desfazer descanso?',
+      destaque: 'Descanso de hoje',
+      mensagem: 'O dia de descanso volta a ficar pendente no rodízio.',
+      textoConfirmar: 'Desfazer',
+      icone: 'arrow-undo-outline',
+    });
+    if (!ok) return;
+    await repo.removerSessao(descansoHoje.id);
+    await carregar();
+  };
+
   const aoTocarBotao = async () => {
     if (sessaoAtiva) return abrirSessao(sessaoAtiva.id);
-    if (semFichas) return router.navigate('/treinos');
     const ficha = fichaDoDia;
+    if (!ficha) return router.navigate('/treinos');
+    if (ficha.descanso) return marcarDescanso(ficha.id);
     const exercicios = await repo.listarExerciciosDaFicha(ficha.id);
     if (exercicios.length === 0) {
       const ok = await confirmar({
@@ -120,7 +200,10 @@ export default function Inicio() {
 
   let textoBotao = 'Iniciar sessão de treino';
   if (sessaoAtiva) textoBotao = 'Continuar treino';
-  else if (semFichas) textoBotao = 'Montar meu treino';
+  else if (semFichas || !fichaDoDia) textoBotao = 'Montar meu treino';
+  else if (descansando) textoBotao = 'Treinar mesmo assim';
+  else if (treinou) textoBotao = 'Fazer outro treino';
+  else if (ehDescanso) textoBotao = 'Descansei hoje';
 
   return (
     <ScrollView contentContainerStyle={styles.conteudo}>
@@ -134,7 +217,15 @@ export default function Inicio() {
       <CartaoSequencia sequencia={sequencia} />
 
       <View style={styles.blocoTreino}>
-        <Text style={styles.titulo}>{sessaoAtiva ? 'Treino em andamento' : 'Treino do dia'}</Text>
+        {ilustracao && (
+          <Image
+            source={ilustracao.imagem}
+            style={[styles.ilustracao, { aspectRatio: ilustracao.proporcao }]}
+            contentFit="contain"
+            accessibilityLabel={ilustracao.descricao}
+          />
+        )}
+        {!treinou && <Text style={styles.titulo}>{sessaoAtiva ? 'Treino em andamento' : 'Treino do dia'}</Text>}
         <Text style={styles.destaque}>{destaque}</Text>
 
         {rotina && (
@@ -142,12 +233,23 @@ export default function Inicio() {
             Rotina: <Text style={styles.nomeRotina}>{rotina.nome}</Text>
           </Text>
         )}
-        {trocou && treino.ficha && (
+        {ehDescanso && <Text style={styles.rotina}>Recupere as energias. O descanso conta na sequência.</Text>}
+        {(descansando || treinou) && fichaDoDia && (
           <Text style={styles.rotina}>
-            Sugestão do rodízio: <Text style={styles.nomeRotina}>{treino.ficha.nome}</Text>
+            Próximo treino: <Text style={styles.nomeRotina}>{fichaDoDia.nome}</Text>
           </Text>
         )}
-        {!sessaoAtiva && fichas.length > 1 && (
+        {descansando && (
+          <Pressable
+            accessibilityRole="button"
+            onPress={desfazerDescanso}
+            hitSlop={6}
+            style={({ pressed }) => [styles.trocar, { opacity: pressed ? 0.6 : 1 }]}>
+            <Ionicons name="arrow-undo-outline" size={18} color={CORES.dourado} />
+            <Text style={styles.textoTrocar}>Desfazer descanso</Text>
+          </Pressable>
+        )}
+        {!sessaoAtiva && !treinou && opcoesTroca.length > 1 && (
           <Pressable
             accessibilityRole="button"
             onPress={() => setTrocando(true)}
@@ -159,7 +261,7 @@ export default function Inicio() {
         )}
         <SeletorTreino
           visivel={trocando}
-          fichas={fichas}
+          fichas={opcoesTroca}
           atual={fichaDoDia?.id ?? null}
           sugerida={treino.ficha?.id ?? null}
           feitasNaSemana={treino.feitasNaSemana}
@@ -230,7 +332,7 @@ const styles = StyleSheet.create({
   blocoTreino: { alignItems: 'center', gap: 12, paddingVertical: 12 },
   titulo: { color: CORES.dourado, fontSize: 16, fontWeight: '700', letterSpacing: 2, textTransform: 'uppercase' },
   destaque: { color: CORES.texto, fontSize: 26, fontWeight: '800', textAlign: 'center' },
-  rotina: { color: CORES.textoSuave, fontSize: 15 },
+  rotina: { color: CORES.textoSuave, fontSize: 15, textAlign: 'center' },
   nomeRotina: { color: CORES.texto, fontWeight: '700' },
   trocar: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 4 },
   textoTrocar: { color: CORES.dourado, fontSize: 15, fontWeight: '700' },
@@ -248,5 +350,6 @@ const styles = StyleSheet.create({
   clubHeavy: { color: CORES.vermelho, fontSize: 36, fontWeight: '900', letterSpacing: 4, lineHeight: 40 },
   clubNome: { color: CORES.texto, fontSize: 15, fontWeight: '800', letterSpacing: 6 },
   clubImagem: { width: '100%', maxWidth: 360, aspectRatio: 774 / 716, marginTop: 12 },
+  ilustracao: { width: '100%', maxWidth: 360 },
   secao: { color: CORES.texto, fontSize: 20, fontWeight: '700', marginTop: 8 },
 });

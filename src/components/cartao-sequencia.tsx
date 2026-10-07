@@ -26,7 +26,7 @@ export function CartaoSequencia({ sequencia }: { sequencia: Sequencia }) {
             </Text>
           ))}
         </View>
-        <View style={styles.flex}>
+        <View>
           <Text style={styles.rotulo}>Sequência</Text>
           <Text style={styles.dias}>
             {dias} {dias === 1 ? 'dia' : 'dias'}
@@ -42,9 +42,9 @@ export function CartaoSequencia({ sequencia }: { sequencia: Sequencia }) {
 
 const styles = StyleSheet.create({
   cartao: { gap: 12 },
-  linha: { flexDirection: 'row', alignItems: 'center', gap: 14 },
-  icones: { width: 88, flexDirection: 'row', justifyContent: 'center', alignItems: 'center' },
-  flex: { flex: 1 },
+  // Fogo + texto formam um bloco centralizado no cartão.
+  linha: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 16 },
+  icones: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center' },
   rotulo: { color: CORES.textoSuave, fontSize: 13, fontWeight: '700', letterSpacing: 2, textTransform: 'uppercase' },
   dias: { color: CORES.texto, fontSize: 32, fontWeight: '900', lineHeight: 38 },
   titulo: { fontSize: 15, fontWeight: '700' },

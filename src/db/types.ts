@@ -28,6 +28,11 @@ export interface Ficha {
   descricao: string | null;
   /** Posição no rodízio semanal dentro da rotina (0 = primeira). */
   ordem: number;
+  /**
+   * Dia de descanso no rodízio (sem exercícios). Marcar "Descansei hoje" grava uma sessão já
+   * concluída e sem séries: conta como feito na semana e na sequência.
+   */
+  descanso: boolean;
   criadaEm: number;
 }
 
@@ -98,7 +103,7 @@ export type TipoMeta = 'cardio' | 'agua';
 
 export type NovoExercicio = Omit<Exercicio, 'id'>;
 export type NovaRotina = Pick<Rotina, 'nome' | 'descricao'>;
-export type NovaFicha = Pick<Ficha, 'rotinaId' | 'nome' | 'descricao'>;
+export type NovaFicha = Pick<Ficha, 'rotinaId' | 'nome' | 'descricao'> & { descanso?: boolean };
 export type NovoFichaExercicio = Omit<FichaExercicio, 'id' | 'ordem'>;
 export type NovaSerie = Omit<Serie, 'id' | 'concluidaEm'>;
 
@@ -162,7 +167,7 @@ export interface Repositorio {
   ultimasSeriesDoExercicio(exercicioId: Id, ignorarSessaoId?: Id): Promise<Serie[]>;
 
 
-  /** Grava uma sessão já concluída, com data no passado (dados de teste, importação). */
+  /** Grava uma sessão já concluída (dados de teste, importação, dia de descanso marcado). */
   importarSessao(dados: {
     fichaId: Id | null;
     nome: string;

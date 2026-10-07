@@ -29,7 +29,7 @@ export default function TelaRotina() {
         const comTotal = await Promise.all(
           lista.map(async (f) => ({
             ...f,
-            totalExercicios: (await repo.listarExerciciosDaFicha(f.id)).length,
+            totalExercicios: f.descanso ? 0 : (await repo.listarExerciciosDaFicha(f.id)).length,
           }))
         );
         if (!ativo) return;
@@ -76,6 +76,23 @@ export default function TelaRotina() {
   const criarTreino = async (nomeTreino: string) => {
     const ficha = await repo.criarFicha({ rotinaId: rotina.id, nome: nomeTreino, descricao: null });
     router.push({ pathname: '/treinos/ficha/[id]', params: { id: String(ficha.id) } });
+  };
+
+  const adicionarDescanso = async () => {
+    const ficha = await repo.criarFicha({ rotinaId: rotina.id, nome: 'Descanso', descricao: null, descanso: true });
+    setFichas([...fichas, { ...ficha, totalExercicios: 0 }]);
+  };
+
+  const removerDescanso = async (f: FichaComTotal, posicao: number) => {
+    const ok = await confirmar({
+      titulo: 'Remover descanso?',
+      destaque: `${f.nome} (${posicao}º no rodízio)`,
+      mensagem: 'O dia de descanso sai do rodízio. Os descansos já marcados continuam contando na sequência.',
+      textoConfirmar: 'Remover',
+    });
+    if (!ok) return;
+    await repo.removerFicha(f.id);
+    setFichas(fichas.filter((x) => x.id !== f.id));
   };
 
   const apagar = async () => {
@@ -131,7 +148,7 @@ export default function TelaRotina() {
       </View>
       {reordenando && (
         <Text style={[styles.detalhe, { color: colors.text }]}>
-          Esta é a ordem do rodízio da semana. Use as setas para subir ou descer cada treino.
+          Esta é a ordem do rodízio da semana. Use as setas para subir ou descer cada treino ou descanso.
         </Text>
       )}
 
@@ -139,10 +156,15 @@ export default function TelaRotina() {
         const conteudo = (
           <View style={styles.linhaTreino}>
             <Text style={[styles.posicao, { color: CORES.dourado }]}>{i + 1}</Text>
+            {f.descanso && <Ionicons name="bed-outline" size={22} color={CORES.dourado} />}
             <View style={styles.flex}>
               <Text style={[styles.nome, { color: colors.text }]}>{f.nome}</Text>
               <Text style={[styles.detalhe, { color: colors.text }]}>
-                {f.totalExercicios === 1 ? '1 exercício' : `${f.totalExercicios} exercícios`}
+                {f.descanso
+                  ? 'Dia de folga no rodízio'
+                  : f.totalExercicios === 1
+                    ? '1 exercício'
+                    : `${f.totalExercicios} exercícios`}
               </Text>
             </View>
           </View>
@@ -165,6 +187,21 @@ export default function TelaRotina() {
           );
         }
 
+        // Descanso não tem exercícios: não abre tela, só pode ser removido.
+        if (f.descanso) {
+          return (
+            <Cartao key={f.id} style={[styles.item, styles.itemDescanso]}>
+              <View style={styles.flex}>{conteudo}</View>
+              <BotaoIcone
+                icone="trash-outline"
+                rotulo="Remover descanso"
+                cor={colors.notification}
+                onPress={() => removerDescanso(f, i + 1)}
+              />
+            </Cartao>
+          );
+        }
+
         return (
           <Pressable
             key={f.id}
@@ -183,7 +220,10 @@ export default function TelaRotina() {
       {/* marginTop 'auto' empurra o rodapé para o fim da tela quando a lista é curta. */}
       <View style={styles.rodape}>
         {!reordenando && (
-          <CriarComNome titulo="Criar novo treino" placeholder='Nome do treino (ex.: "Treino A - Peito")' onCriar={criarTreino} />
+          <>
+            <CriarComNome titulo="Criar novo treino" placeholder='Nome do treino (ex.: "Treino A - Peito")' onCriar={criarTreino} />
+            <Botao titulo="Adicionar dia de descanso" variante="secundario" icone="bed-outline" onPress={adicionarDescanso} />
+          </>
         )}
         <Botao titulo="Apagar rotina" variante="perigo" icone="trash-outline" onPress={apagar} />
       </View>
@@ -210,6 +250,7 @@ const styles = StyleSheet.create({
   },
   textoReordenar: { fontSize: 14, fontWeight: '700' },
   item: { flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 76 },
+  itemDescanso: { borderStyle: 'dashed' },
   linhaTreino: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   posicao: { fontSize: 20, fontWeight: '700', width: 22, textAlign: 'center' },
   flex: { flex: 1 },

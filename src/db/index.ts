@@ -116,6 +116,9 @@ const MIGRACOES = [
   `
   DROP TABLE cache;
   `,
+  `
+  ALTER TABLE fichas ADD COLUMN descanso INTEGER NOT NULL DEFAULT 0;
+  `,
 ];
 
 let dbPromise: Promise<SQLite.SQLiteDatabase> | null = null;
@@ -141,7 +144,7 @@ function getDb() {
 
 const COLS_EXERCICIO = `id, nome, grupo_muscular AS grupoMuscular, video_url AS videoUrl, observacoes`;
 const COLS_ROTINA = `id, nome, descricao, ativa, criada_em AS criadaEm`;
-const COLS_FICHA = `id, rotina_id AS rotinaId, nome, descricao, ordem, criada_em AS criadaEm`;
+const COLS_FICHA = `id, rotina_id AS rotinaId, nome, descricao, ordem, descanso, criada_em AS criadaEm`;
 const COLS_SESSAO = `id, ficha_id AS fichaId, nome, inicio, fim`;
 const COLS_SERIE = `id, sessao_id AS sessaoId, exercicio_id AS exercicioId, numero, tipo, carga,
   repeticoes, concluida_em AS concluidaEm`;
@@ -150,6 +153,12 @@ type LinhaRotina = Omit<Rotina, 'ativa'> & { ativa: number };
 
 function paraRotina({ ativa, ...r }: LinhaRotina): Rotina {
   return { ...r, ativa: ativa === 1 };
+}
+
+type LinhaFicha = Omit<Ficha, 'descanso'> & { descanso: number };
+
+function paraFicha({ descanso, ...f }: LinhaFicha): Ficha {
+  return { ...f, descanso: descanso === 1 };
 }
 
 interface LinhaFichaExercicio {
@@ -297,14 +306,16 @@ export const repo: Repositorio = {
 
   async listarFichas(rotinaId) {
     const db = await getDb();
-    return db.getAllAsync<Ficha>(
+    const linhas = await db.getAllAsync<LinhaFicha>(
       `SELECT ${COLS_FICHA} FROM fichas WHERE rotina_id = ? ORDER BY ordem, id`,
       rotinaId
     );
+    return linhas.map(paraFicha);
   },
   async obterFicha(id) {
     const db = await getDb();
-    return db.getFirstAsync<Ficha>(`SELECT ${COLS_FICHA} FROM fichas WHERE id = ?`, id);
+    const l = await db.getFirstAsync<LinhaFicha>(`SELECT ${COLS_FICHA} FROM fichas WHERE id = ?`, id);
+    return l ? paraFicha(l) : null;
   },
   async criarFicha(dados) {
     const db = await getDb();
@@ -314,15 +325,17 @@ export const repo: Repositorio = {
       dados.rotinaId
     );
     const ordem = (max?.m ?? -1) + 1;
+    const descanso = dados.descanso ?? false;
     const r = await db.runAsync(
-      'INSERT INTO fichas (rotina_id, nome, descricao, ordem, criada_em) VALUES (?, ?, ?, ?, ?)',
+      'INSERT INTO fichas (rotina_id, nome, descricao, ordem, descanso, criada_em) VALUES (?, ?, ?, ?, ?, ?)',
       dados.rotinaId,
       dados.nome,
       dados.descricao,
       ordem,
+      descanso ? 1 : 0,
       criadaEm
     );
-    return { id: r.lastInsertRowId, ordem, criadaEm, ...dados };
+    return { id: r.lastInsertRowId, ordem, criadaEm, ...dados, descanso };
   },
   atualizarFicha(id, dados) {
     return atualizar('fichas', id, dados, { nome: 'nome', descricao: 'descricao' });

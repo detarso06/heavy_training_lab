@@ -5,7 +5,7 @@ import { Pressable, StyleSheet } from 'react-native';
 import { useAvatarAtual } from '@/lib/avatar-atual';
 import { CORES } from '@/lib/tema';
 
-/** Heavy Guy escolhido pelo usuário, no canto do cabeçalho: abre a aba Usuário. */
+/** Heavy Guy escolhido pelo usuário, no canto do cabeçalho: abre Configurações (rota /usuario). */
 export function BotaoUsuario() {
   const avatar = useAvatarAtual();
   return (
