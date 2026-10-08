@@ -1,11 +1,12 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Image } from 'expo-image';
-import { useLocalSearchParams } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState, type ComponentProps } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { Botao, Cartao } from '@/components/ui';
 import { repo, type Serie, type Sessao } from '@/db';
+import { clubConfigurado } from '@/lib/club';
 import { voltarAoInicio } from '@/lib/navegacao';
 import { compararEvolucao, formatarDuracao, formatarKg, resumirSeries, type Evolucao } from '@/lib/sessao';
 import { CORES } from '@/lib/tema';
@@ -150,7 +151,21 @@ export default function TelaResumo() {
         );
       })}
 
-      <Botao titulo="Voltar ao início" icone="home-outline" onPress={voltarAoInicio} style={styles.voltar} />
+      {clubConfigurado && (
+        <Botao
+          titulo="Postar no Heavy Training Club"
+          icone="people-outline"
+          onPress={() => router.push({ pathname: '/treinos/postar/[id]', params: { id: String(sessao.id) } })}
+          style={styles.voltar}
+        />
+      )}
+      <Botao
+        titulo="Voltar ao início"
+        variante={clubConfigurado ? 'secundario' : 'primario'}
+        icone="home-outline"
+        onPress={voltarAoInicio}
+        style={styles.voltar}
+      />
     </ScrollView>
   );
 }

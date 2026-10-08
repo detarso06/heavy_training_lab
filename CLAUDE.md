@@ -20,7 +20,7 @@ Antigo "App Treino": o repositório no GitHub e a pasta local ainda se chamam `a
 - O `gh` fica em `C:\Program Files\GitHub CLI\gh.exe` (pode não estar no PATH).
 
 ## Arquitetura
-- Expo Router com menu lateral (drawer) em `src/app/_layout.tsx`: Início, Treinos, Evolução e, fixo no rodapé do menu, **Configurações** (rota `/usuario`, antiga aba Usuário). Treinos e Evolução têm pilha própria (`_layout.tsx` com `BotaoMenu`).
+- Expo Router com menu lateral (drawer) em `src/app/_layout.tsx`: Início, Treinos, Evolução, Heavy Club e, fixo no rodapé do menu, **Configurações** (rota `/usuario`, antiga aba Usuário). Treinos e Evolução têm pilha própria (`_layout.tsx` com `BotaoMenu`).
 - Dados: interface `Repositorio` em `src/db/types.ts`, com duas implementações:
   - `src/db/index.ts` — SQLite (celular), migrações em `MIGRACOES` via `PRAGMA user_version`. Nunca editar uma migração existente; sempre adicionar uma nova.
   - `src/db/index.web.ts` — localStorage (web). Deve se comportar igual à versão SQLite.
@@ -41,6 +41,17 @@ Antigo "App Treino": o repositório no GitHub e a pasta local ainda se chamam `a
 - **Sequência (painel Início)**: dias seguidos do calendário com pelo menos uma sessão **concluída** (`src/lib/sequencia.ts`). Se hoje ainda não teve treino, a sequência de ontem vale até o fim do dia; um dia inteiro sem treino zera. Decisão: dias do calendário, não 24h corridas (pedido original falava em "24 horas"). Níveis em `nivelDaSequencia`: 0 Frio 🧊, 1+ Aquecendo 🔥, 3+ Pegando fogo 🔥🔥, 7+ Em chamas 🔥🔥🔥, 14+ Imparável ☄️, 30+ Lendário 🌋.
   - Futuro: cada nível terá uma imagem própria do Heavy Guy, e ao zerar a sequência ele volta à imagem inicial.
 - **Metas no painel Início**: o usuário arrasta uma barra (`BarraArrastavel`) de 0 até a meta para dizer quanto já fez. O valor é absoluto, não soma. Cardio vale por semana (período = segunda-feira, como o rodízio) e água por dia; cada período fica salvo em `progresso_metas` (histórico para a Evolução).
+
+## Heavy Training Club (comunidade, branch `feature/club`)
+- Servidor: **Supabase** (login, Postgres com RLS, fotos no Storage). Banco em `supabase/`: `schema.sql` e depois os arquivos numerados (`002_…`, `003_…`) em ordem, no SQL Editor. Nunca editar um arquivo já aplicado; sempre criar o próximo número. Projeto `heavy-training-club` (ref `sftsxnvztzfjuxqlwrxx`, São Paulo). Cuidado ao revogar EXECUTE de `public`: o papel `supabase_auth_admin` precisa executar o trigger `criar_perfil`. Configuração em `.env.local` (modelo em `.env.example`); sem ela o app funciona e o Club aparece como "não configurado".
+- Decisão: **os treinos continuam no aparelho**. O app só publica o social: perfil (nome, avatar, código, privacidade e o "retrato": sequência, rotina atual, PRs escolhidos) e check-ins. Sincronizar o histórico completo fica para depois.
+- **Só amigos**: cada perfil tem um **código de amizade** de 6 caracteres. O amigo digita o código ("Adicionar amigo"), a outra pessoa aceita ou recusa. Se os dois se pedirem, vira amizade direto. Ninguém lê perfis de não amigos (pedidos usam as funções `enviar_pedido`/`listar_pedidos`).
+- **Privacidade** (Club → Privacidade): check-ins/fotos, sequência, rotina atual e o PR de cada exercício, um a um. O que está desligado nem sai do aparelho (e o RLS confere de novo no servidor).
+- **PR** = maior carga numa série válida (empate: mais reps). `src/lib/prs.ts`. PR do dia no check-in = passou do recorde anterior; a primeira vez num exercício não conta.
+- **Check-in**: no resumo do treino, "Postar no Heavy Training Club" (foto opcional reduzida para 1080 px JPEG, legenda, números do dia e PRs). Fotos em bucket privado, exibidas por link temporário.
+- **Feed**: fim do Início (`FeedClub`), check-ins dos amigos e os seus. Deslogado: convite para entrar.
+- Login por e-mail e senha (confirmação de e-mail desligada no Supabase por enquanto; o e-mail padrão do Supabase só envia para a equipe do projeto). Futuro: SMTP próprio, recuperar senha, comentários, curtidas, bloquear/denunciar (exigido pela App Store para conteúdo de usuários), apagar conta.
+- Código: `src/lib/supabase.ts` (cliente), `src/lib/club.ts` (API), telas em `src/app/club/` e `src/app/treinos/postar/[id].tsx`.
 
 ## Funcionalidades pedidas (visão geral)
 Montar fichas; iniciar/encerrar sessão; registrar séries (carga/reps) com a última carga salva; timer de descanso; cronômetro da sessão; link para vídeo de execução de cada exercício; resumo ao concluir; informações por série.

@@ -6,6 +6,7 @@ import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from
 
 import { CartaoMeta } from '@/components/cartao-meta';
 import { CartaoSequencia } from '@/components/cartao-sequencia';
+import { FeedClub } from '@/components/feed-club';
 import { SeletorTreino } from '@/components/seletor-treino';
 import { useConfirmacao } from '@/components/dialogo-confirmacao';
 import { repo, type Ficha, type Perfil, type Rotina, type Sessao } from '@/db';
@@ -170,9 +171,14 @@ export default function Inicio() {
 
   const aoTocarBotao = async () => {
     if (sessaoAtiva) return abrirSessao(sessaoAtiva.id);
-    const ficha = fichaDoDia;
-    if (!ficha) return router.navigate('/treinos');
-    if (ficha.descanso) return marcarDescanso(ficha.id);
+    // Já treinou hoje: escolhe qual treino fazer agora (no seletor) em vez de seguir o rodízio.
+    if (treinou) return setTrocando(true);
+    if (!fichaDoDia) return router.navigate('/treinos');
+    if (fichaDoDia.descanso) return marcarDescanso(fichaDoDia.id);
+    await iniciarTreino(fichaDoDia);
+  };
+
+  const iniciarTreino = async (ficha: Ficha) => {
     const exercicios = await repo.listarExerciciosDaFicha(ficha.id);
     if (exercicios.length === 0) {
       const ok = await confirmar({
@@ -261,13 +267,15 @@ export default function Inicio() {
         )}
         <SeletorTreino
           visivel={trocando}
-          fichas={opcoesTroca}
-          atual={fichaDoDia?.id ?? null}
-          sugerida={treino.ficha?.id ?? null}
+          fichas={treinou ? treinos : opcoesTroca}
+          atual={treinou ? null : (fichaDoDia?.id ?? null)}
+          sugerida={treinou ? (proximoTreino?.id ?? null) : (treino.ficha?.id ?? null)}
           feitasNaSemana={treino.feitasNaSemana}
           onEscolher={(id) => {
-            setEscolhida(id === treino.ficha?.id ? null : id);
             setTrocando(false);
+            const ficha = fichas.find((f) => f.id === id);
+            if (treinou && ficha) iniciarTreino(ficha);
+            else setEscolhida(id === treino.ficha?.id ? null : id);
           }}
           onFechar={() => setTrocando(false)}
         />
@@ -305,19 +313,7 @@ export default function Inicio() {
         textoSemMeta="Defina sua meta diária de água no seu perfil →"
       />
 
-      <View style={styles.club}>
-        <View style={styles.seloDev}>
-          <Text style={styles.textoSeloDev}>EM DESENVOLVIMENTO</Text>
-        </View>
-        <Text style={styles.clubHeavy}>HEAVY</Text>
-        <Text style={styles.clubNome}>TRAINING CLUB</Text>
-        <Image
-          source={require('@/../assets/images/heavy-club.png')}
-          style={styles.clubImagem}
-          contentFit="contain"
-          accessibilityLabel="Heavy Guy cansado no banco da academia"
-        />
-      </View>
+      <FeedClub />
     </ScrollView>
   );
 }
@@ -344,12 +340,6 @@ const styles = StyleSheet.create({
     borderRadius: 12,
   },
   textoBotao: { color: CORES.texto, fontSize: 18, fontWeight: '700' },
-  club: { alignItems: 'center', marginTop: 28, gap: 2 },
-  seloDev: { borderWidth: 1.5, borderColor: CORES.dourado, borderRadius: 999, paddingVertical: 4, paddingHorizontal: 12, marginBottom: 10 },
-  textoSeloDev: { color: CORES.dourado, fontSize: 12, fontWeight: '800', letterSpacing: 2 },
-  clubHeavy: { color: CORES.vermelho, fontSize: 36, fontWeight: '900', letterSpacing: 4, lineHeight: 40 },
-  clubNome: { color: CORES.texto, fontSize: 15, fontWeight: '800', letterSpacing: 6 },
-  clubImagem: { width: '100%', maxWidth: 360, aspectRatio: 774 / 716, marginTop: 12 },
   ilustracao: { width: '100%', maxWidth: 360 },
   secao: { color: CORES.texto, fontSize: 20, fontWeight: '700', marginTop: 8 },
 });

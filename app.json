@@ -38,7 +38,15 @@
         }
       ],
       "expo-sqlite",
-      "expo-video"
+      "expo-video",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "O Heavy Training Lab usa suas fotos para você postar o treino no Heavy Training Club.",
+          "cameraPermission": false,
+          "microphonePermission": false
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

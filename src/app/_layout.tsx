@@ -28,9 +28,11 @@ const TELAS: {
   rodape?: boolean;
 }[] = [
   { name: 'index', titulo: 'Início', icone: 'home-outline', botaoUsuario: true },
-  // Treinos e Evolução têm pilha de telas própria (com botão voltar), então escondem o cabeçalho do menu.
+  { name: 'perfil', titulo: 'Perfil', icone: 'person-circle-outline' },
+  // Treinos, Evolução e Club têm pilha de telas própria (com botão voltar), então escondem o cabeçalho do menu.
   { name: 'treinos', titulo: 'Treinos', icone: 'barbell-outline', cabecalhoProprio: true },
   { name: 'evolucao', titulo: 'Evolução', icone: 'trending-up-outline', cabecalhoProprio: true },
+  { name: 'club', titulo: 'Heavy Club', icone: 'people-outline', cabecalhoProprio: true },
   { name: 'usuario', titulo: 'Configurações', icone: 'settings-outline', rodape: true },
 ];
 

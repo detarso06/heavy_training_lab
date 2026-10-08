@@ -25,6 +25,7 @@ export default function TreinosLayout() {
           gestureEnabled: false,
         }}
       />
+      <Stack.Screen name="postar/[id]" options={{ title: 'Postar no Club', presentation: 'modal' }} />
       <Stack.Screen
         name="adicionar-exercicio"
         options={{ title: 'Adicionar exercícios', presentation: 'modal' }}
