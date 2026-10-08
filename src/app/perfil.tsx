@@ -1,11 +1,12 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { router, useFocusEffect } from 'expo-router';
+import { useFocusEffect } from 'expo-router';
 import { useCallback, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 
 import { AvatarClub, CartaoCheckin } from '@/components/cartao-checkin';
 import { CartaoSequencia } from '@/components/cartao-sequencia';
 import { useConfirmacao } from '@/components/dialogo-confirmacao';
+import { FormularioConta } from '@/components/formulario-conta';
 import { Botao, Cartao } from '@/components/ui';
 import { repo } from '@/db';
 import { mensagemDeErro } from '@/lib/avisos';
@@ -45,10 +46,10 @@ export default function TelaPerfil() {
   if (usuario === undefined) return <ActivityIndicator style={styles.carregando} />;
   if (usuario === null) {
     return (
-      <View style={styles.centro}>
-        <Text style={styles.suave}>Seu perfil fica no Heavy Training Club. Entre ou crie sua conta para montar o seu.</Text>
-        <Botao titulo="Entrar no Club" icone="people-outline" onPress={() => router.navigate('/club')} />
-      </View>
+      <ScrollView contentContainerStyle={styles.conteudo} keyboardShouldPersistTaps="handled">
+        <Text style={styles.suave}>Seu perfil fica na sua conta do Heavy Training Club. Entre ou crie a sua.</Text>
+        <FormularioConta />
+      </ScrollView>
     );
   }
   return <MeuPerfil key={usuario} usuario={usuario} />;

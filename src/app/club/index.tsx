@@ -7,14 +7,13 @@ import { ActivityIndicator, Pressable, ScrollView, Share, StyleSheet, Text, View
 
 import { AvatarClub } from '@/components/cartao-checkin';
 import { useConfirmacao } from '@/components/dialogo-confirmacao';
+import { FormularioConta } from '@/components/formulario-conta';
 import { Botao, Campo, Cartao } from '@/components/ui';
 import { mensagemDeErro } from '@/lib/avisos';
 import {
   aceitarPedido,
   clubConfigurado,
-  criarConta,
   desfazerVinculo,
-  entrar,
   enviarPedido,
   listarAmigos,
   listarPedidos,
@@ -37,87 +36,27 @@ export default function TelaClub() {
     );
   }
   if (usuario === undefined) return <ActivityIndicator style={styles.carregando} />;
-  if (usuario === null) return <Entrar />;
+  if (usuario === null) {
+    return (
+      <ScrollView contentContainerStyle={styles.conteudo} keyboardShouldPersistTaps="handled">
+        <View style={styles.marca}>
+          <Text style={styles.marcaHeavy}>HEAVY</Text>
+          <Text style={styles.marcaClub}>TRAINING CLUB</Text>
+          <Image
+            source={require('@/../assets/images/heavy-club.png')}
+            style={styles.imagemClub}
+            contentFit="contain"
+            accessibilityLabel="Heavy Guy exausto no banco da academia"
+          />
+          <Text style={styles.textoSuave}>
+            Treine junto com seus amigos: veja os check-ins, as sequências e os PRs de quem você adicionar.
+          </Text>
+        </View>
+        <FormularioConta />
+      </ScrollView>
+    );
+  }
   return <MeuClub key={usuario} />;
-}
-
-function Entrar() {
-  const [criando, setCriando] = useState(false);
-  const [nome, setNome] = useState('');
-  const [email, setEmail] = useState('');
-  const [senha, setSenha] = useState('');
-  const [enviando, setEnviando] = useState(false);
-  const [erro, setErro] = useState<string | null>(null);
-
-  const podeEnviar = !!email.trim() && senha.length > 0 && (!criando || !!nome.trim());
-
-  const enviar = async () => {
-    if (!podeEnviar || enviando) return;
-    setEnviando(true);
-    setErro(null);
-    try {
-      if (criando) await criarConta(nome, email, senha);
-      else await entrar(email, senha);
-    } catch (e) {
-      setErro(mensagemDeErro(e));
-    } finally {
-      setEnviando(false);
-    }
-  };
-
-  return (
-    <ScrollView contentContainerStyle={styles.conteudo} keyboardShouldPersistTaps="handled">
-      <View style={styles.marca}>
-        <Text style={styles.marcaHeavy}>HEAVY</Text>
-        <Text style={styles.marcaClub}>TRAINING CLUB</Text>
-        <Image
-          source={require('@/../assets/images/heavy-club.png')}
-          style={styles.imagemClub}
-          contentFit="contain"
-          accessibilityLabel="Heavy Guy exausto no banco da academia"
-        />
-        <Text style={styles.textoSuave}>
-          Treine junto com seus amigos: veja os check-ins, as sequências e os PRs de quem você adicionar.
-        </Text>
-      </View>
-
-      <Text style={styles.secao}>{criando ? 'Criar conta' : 'Entrar'}</Text>
-      {criando && (
-        <Campo placeholder="Seu nome no Club" value={nome} onChangeText={setNome} maxLength={40} autoComplete="name" />
-      )}
-      <Campo
-        placeholder="E-mail"
-        value={email}
-        onChangeText={setEmail}
-        autoCapitalize="none"
-        autoComplete="email"
-        keyboardType="email-address"
-      />
-      <Campo
-        placeholder={criando ? 'Senha (mínimo 6 caracteres)' : 'Senha'}
-        value={senha}
-        onChangeText={setSenha}
-        secureTextEntry
-        autoComplete={criando ? 'new-password' : 'current-password'}
-        onSubmitEditing={enviar}
-      />
-      {erro && <Text style={styles.erro}>{erro}</Text>}
-      <Botao
-        titulo={enviando ? 'Aguarde…' : criando ? 'Criar conta' : 'Entrar'}
-        onPress={enviar}
-        desabilitado={!podeEnviar || enviando}
-      />
-      <Pressable
-        accessibilityRole="button"
-        onPress={() => {
-          setCriando(!criando);
-          setErro(null);
-        }}
-        style={styles.alternar}>
-        <Text style={styles.link}>{criando ? 'Já tenho conta: entrar' : 'Não tenho conta: criar agora'}</Text>
-      </Pressable>
-    </ScrollView>
-  );
 }
 
 interface Dados {
@@ -349,7 +288,6 @@ const styles = StyleSheet.create({
   textoSuave: { color: CORES.textoSuave, fontSize: 14, textAlign: 'center' },
   erro: { color: CORES.vermelho, fontSize: 15, fontWeight: '600', textAlign: 'center' },
   ok: { color: CORES.dourado, fontSize: 15, fontWeight: '600', textAlign: 'center' },
-  alternar: { alignItems: 'center', paddingVertical: 8 },
   link: { color: CORES.dourado, fontSize: 15, fontWeight: '700' },
   perfil: { flexDirection: 'row', alignItems: 'center', gap: 14 },
   nomePerfil: { color: CORES.texto, fontSize: 24, fontWeight: '800' },

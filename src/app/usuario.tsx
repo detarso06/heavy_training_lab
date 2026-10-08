@@ -5,10 +5,13 @@ import { useCallback, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { useConfirmacao } from '@/components/dialogo-confirmacao';
+import { MinhaConta } from '@/components/minha-conta';
 import { SeletorAvatar } from '@/components/seletor-avatar';
 import { Botao, Campo, Cartao, Contador } from '@/components/ui';
 import { repo } from '@/db';
-import { escolherAvatar, useAvatarAtual } from '@/lib/avatar-atual';
+import { escolherAvatar, esquecerAvatar, useAvatarAtual } from '@/lib/avatar-atual';
+import { mensagemDeErro } from '@/lib/avisos';
+import { clubConfigurado, excluirConta, useUsuarioClub } from '@/lib/club';
 import { preencherComDadosDeTeste } from '@/lib/dados-de-teste';
 import { formatarLitros, formatarMinutos, lerNumero } from '@/lib/metas';
 import { CORES } from '@/lib/tema';
@@ -32,26 +35,33 @@ export default function Usuario() {
   const avatar = useAvatarAtual();
   const { confirmar, dialogo } = useConfirmacao();
   const [preenchendo, setPreenchendo] = useState(false);
+  const usuarioClub = useUsuarioClub();
+  const [excluindo, setExcluindo] = useState(false);
+  const [erroExcluir, setErroExcluir] = useState<string | null>(null);
 
-  useFocusEffect(
-    useCallback(() => {
-      let ativo = true;
-      repo.obterPerfil().then((p) => {
-        if (!ativo) return;
-        setForm({
+  const carregarPerfil = useCallback((aindaAtivo: () => boolean = () => true) => {
+    repo.obterPerfil().then((p) => {
+      if (!aindaAtivo()) return;
+      setForm({
           nome: p.nome ?? '',
           idade: texto(p.idade),
           altura: texto(p.alturaCm),
           peso: texto(p.pesoKg),
           cardioAtividade: p.cardioAtividade ?? '',
           metaCardioMin: p.metaCardioMin ?? 0,
-          metaAguaMl: p.metaAguaMl ?? 0,
-        });
+        metaAguaMl: p.metaAguaMl ?? 0,
       });
+    });
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      let ativo = true;
+      carregarPerfil(() => ativo);
       return () => {
         ativo = false;
       };
-    }, [])
+    }, [carregarPerfil])
   );
 
   if (!form) return <ActivityIndicator style={styles.carregando} />;
@@ -93,12 +103,57 @@ export default function Usuario() {
     router.navigate('/');
   };
 
+  /** Apaga tudo: a conta do Club (se houver) e todos os dados deste aparelho. */
+  const excluirTudo = async () => {
+    const ok = await confirmar({
+      titulo: 'Excluir conta?',
+      destaque: form.nome.trim() || 'Minha conta',
+      mensagem: `Apaga para sempre suas rotinas, treinos, histórico, metas e perfil${
+        usuarioClub ? ', e também sua conta do Heavy Training Club com amigos, PRs, check-ins e fotos' : ''
+      }. Não dá para desfazer.`,
+      textoConfirmar: 'Continuar',
+      icone: 'warning-outline',
+    });
+    if (!ok) return;
+    const certeza = await confirmar({
+      titulo: 'Última confirmação',
+      destaque: 'Excluir tudo agora',
+      mensagem: 'Depois disso o app volta a ficar como novo.',
+      textoConfirmar: 'Excluir tudo',
+    });
+    if (!certeza) return;
+
+    setExcluindo(true);
+    setErroExcluir(null);
+    try {
+      // Primeiro a nuvem: se falhar (ex.: sem internet), os dados do aparelho continuam para tentar de novo.
+      if (usuarioClub) await excluirConta();
+      await repo.apagarDadosDeTreino();
+      await repo.salvarPerfil({
+        nome: null,
+        idade: null,
+        alturaCm: null,
+        pesoKg: null,
+        cardioAtividade: null,
+        metaCardioMin: null,
+        metaAguaMl: null,
+      });
+      await esquecerAvatar();
+      router.navigate('/');
+    } catch (e) {
+      setErroExcluir(mensagemDeErro(e));
+    } finally {
+      setExcluindo(false);
+    }
+  };
+
   const altura = lerNumero(form.altura);
   const peso = lerNumero(form.peso);
   const imc = altura && peso ? peso / (altura / 100) ** 2 : null;
 
   return (
     <ScrollView contentContainerStyle={styles.conteudo} keyboardShouldPersistTaps="handled">
+      {dialogo}
       <View style={styles.topo}>
         <Pressable
           accessibilityRole="button"
@@ -211,10 +266,31 @@ export default function Usuario() {
         style={styles.salvar}
       />
 
+      {clubConfigurado && (
+        <>
+          <Text style={styles.secao}>Minha conta</Text>
+          <MinhaConta onDadosTrazidos={() => carregarPerfil()} />
+        </>
+      )}
+
+      <View style={styles.zonaPerigo}>
+        <Text style={styles.rotulo}>Conta</Text>
+        <Text style={styles.detalhe}>
+          Excluir a conta apaga todos os seus dados deste aparelho{usuarioClub ? ' e do Heavy Training Club' : ''}.
+        </Text>
+        {erroExcluir && <Text style={styles.erro}>{erroExcluir}</Text>}
+        <Botao
+          titulo={excluindo ? 'Excluindo…' : 'Excluir conta'}
+          variante="perigo"
+          icone="trash-outline"
+          desabilitado={excluindo}
+          onPress={excluirTudo}
+        />
+      </View>
+
       {/* Só em desenvolvimento: nunca aparece no app publicado. */}
       {__DEV__ && (
         <View style={styles.dev}>
-          {dialogo}
           <Text style={styles.rotulo}>Desenvolvimento</Text>
           <Botao
             titulo={preenchendo ? 'Preenchendo…' : 'Preencher com dados de teste'}
@@ -261,5 +337,7 @@ const styles = StyleSheet.create({
   tituloMeta: { color: CORES.dourado, fontSize: 16, fontWeight: '700' },
   linhaMeta: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
   salvar: { marginTop: 8, paddingVertical: 16 },
+  zonaPerigo: { marginTop: 32, gap: 8, borderTopWidth: StyleSheet.hairlineWidth, borderColor: CORES.borda, paddingTop: 16 },
+  erro: { color: CORES.vermelho, fontSize: 15, fontWeight: '600' },
   dev: { marginTop: 32, gap: 8, borderTopWidth: StyleSheet.hairlineWidth, borderColor: CORES.borda, paddingTop: 16 },
 });

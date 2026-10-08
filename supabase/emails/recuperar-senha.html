@@ -1,0 +1,16 @@
+<!--
+  E-mail de "Esqueci minha senha" (Authentication → Emails → Reset password).
+  Assunto: Seu código do Heavy Training Club
+  Só dá para aplicar com SMTP próprio configurado (limite do plano grátis do Supabase).
+  {{ .Token }} = código de 6 dígitos (mailer_otp_length = 6), válido por 15 minutos (mailer_otp_exp = 900).
+-->
+<div style="background:#0B0A09;padding:32px 16px;font-family:Arial,Helvetica,sans-serif;text-align:center">
+  <div style="max-width:420px;margin:0 auto;background:#171412;border:1px solid #2E2823;border-radius:16px;padding:28px 20px">
+    <div style="color:#E3262B;font-size:34px;font-weight:900;letter-spacing:4px">HEAVY</div>
+    <div style="color:#F3E9D8;font-size:13px;font-weight:800;letter-spacing:5px;margin-bottom:24px">TRAINING CLUB</div>
+    <p style="color:#F3E9D8;font-size:16px;margin:0 0 8px">Seu código para criar uma senha nova:</p>
+    <div style="color:#F2B33D;font-size:40px;font-weight:900;letter-spacing:10px;margin:16px 0">{{ .Token }}</div>
+    <p style="color:#A89C8C;font-size:14px;margin:0">Digite esse código no app. Ele vale por 15 minutos.</p>
+    <p style="color:#A89C8C;font-size:13px;margin:24px 0 0">Não pediu para trocar a senha? Pode ignorar este e-mail: sua senha continua a mesma.</p>
+  </div>
+</div>

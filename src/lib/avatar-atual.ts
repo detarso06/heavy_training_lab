@@ -38,3 +38,10 @@ export async function escolherAvatar(id: string) {
   notificar();
   await repo.salvarPerfil({ avatar: id });
 }
+
+/** Volta ao Heavy Guy padrão (ao excluir a conta). */
+export async function esquecerAvatar() {
+  atual = null;
+  notificar();
+  await repo.salvarPerfil({ avatar: null });
+}

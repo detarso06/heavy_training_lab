@@ -4,10 +4,11 @@
 import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 import { useEffect, useState } from 'react';
 
-import { repo, type Sessao } from '@/db';
+import { repo, type Perfil, type Sessao } from '@/db';
 import { dataLocal } from '@/lib/metas';
 import { calcularRecordes, carregarHistoricoCompleto, type Recorde } from '@/lib/prs';
 import { calcularSequencia } from '@/lib/sequencia';
+import { copiarTreinosDoAparelho, NOME_DO_APARELHO, type RotinaCopiada } from '@/lib/transferir-treinos';
 import { resumirSeries } from '@/lib/sessao';
 import { supabase } from '@/lib/supabase';
 
@@ -24,7 +25,9 @@ const TRADUCOES: [RegExp, string][] = [
   [/password should be at least/i, 'A senha precisa ter pelo menos 6 caracteres.'],
   [/unable to validate email|invalid email/i, 'Esse e-mail não parece válido.'],
   [/email not confirmed/i, 'Confirme seu e-mail antes de entrar.'],
-  [/rate limit|too many requests/i, 'Muitas tentativas seguidas. Espere um pouco e tente de novo.'],
+  [/rate limit|too many requests|security purposes/i, 'Muitas tentativas seguidas. Espere um pouco e tente de novo.'],
+  [/token has expired|otp.*(expired|invalid)|invalid.*(otp|token)/i, 'Código inválido ou vencido. Peça um novo.'],
+  [/should be different from the old/i, 'A senha nova precisa ser diferente da antiga.'],
   [/failed to fetch|network request failed/i, 'Sem conexão com o Club. Verifique a internet.'],
 ];
 
@@ -71,6 +74,39 @@ export async function entrar(email: string, senha: string) {
   if (error) falhar(error);
 }
 
+/** Esqueci minha senha: manda um código de 6 dígitos para o e-mail (vale 15 minutos). */
+export async function pedirCodigoDeSenha(email: string) {
+  const { error } = await cliente().auth.resetPasswordForEmail(email.trim());
+  if (error) falhar(error);
+}
+
+/** Confere o código do e-mail, entra na conta e troca a senha. */
+export async function redefinirSenha(email: string, codigo: string, novaSenha: string) {
+  const { error } = await cliente().auth.verifyOtp({ email: email.trim(), token: codigo.trim(), type: 'recovery' });
+  if (error) falhar(error);
+  const troca = await cliente().auth.updateUser({ password: novaSenha });
+  if (troca.error) falhar(troca.error);
+}
+
+/**
+ * Exclui a conta do Club: apaga as fotos (pelo Storage) e depois a conta, que leva junto perfil,
+ * amizades, PRs e check-ins (supabase/005_apagar_minha_conta.sql).
+ */
+export async function excluirConta() {
+  const eu = await meuId();
+  const pasta = cliente().storage.from('checkins');
+  const { data: arquivos, error } = await pasta.list(eu, { limit: 1000 });
+  if (error) falhar(error);
+  if (arquivos.length > 0) {
+    const r = await pasta.remove(arquivos.map((a) => `${eu}/${a.name}`));
+    if (r.error) falhar(r.error);
+  }
+  const { error: erroConta } = await cliente().rpc('apagar_minha_conta');
+  if (erroConta) falhar(erroConta);
+  // A sessão já não vale no servidor; só limpa a deste aparelho.
+  await cliente().auth.signOut({ scope: 'local' });
+}
+
 export async function sair() {
   const { error } = await cliente().auth.signOut();
   if (error) falhar(error);
@@ -92,6 +128,8 @@ export interface PerfilClub {
   sequencia: number | null;
   sequenciaAte: string | null;
   rotinaAtual: string | null;
+  /** Até quando o usuário já viu as novidades do sininho. */
+  notificacoesVistasEm: string;
 }
 
 interface LinhaPerfil {
@@ -107,6 +145,7 @@ interface LinhaPerfil {
   sequencia: number | null;
   sequencia_ate: string | null;
   rotina_atual: string | null;
+  notificacoes_vistas_em: string;
 }
 
 function paraPerfil(l: LinhaPerfil): PerfilClub {
@@ -123,6 +162,7 @@ function paraPerfil(l: LinhaPerfil): PerfilClub {
     sequencia: l.sequencia,
     sequenciaAte: l.sequencia_ate,
     rotinaAtual: l.rotina_atual,
+    notificacoesVistasEm: l.notificacoes_vistas_em,
   };
 }
 
@@ -403,4 +443,88 @@ export async function apagarCheckin(checkin: Checkin) {
   const { error } = await cliente().from('checkins').delete().eq('id', checkin.id);
   if (error) falhar(error);
   if (checkin.foto) await cliente().storage.from('checkins').remove([checkin.foto]);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Notificações (sininho): pedidos de amizade recebidos e check-ins novos dos amigos
+
+export interface Notificacoes {
+  pedidos: Pedido[];
+  /** Check-ins recentes dos amigos (os novos têm criadoEm > vistasEm). */
+  checkins: Checkin[];
+  vistasEm: string;
+}
+
+export async function listarNotificacoes(): Promise<Notificacoes> {
+  const eu = await meuId();
+  const [perfil, pedidos, checkins] = await Promise.all([obterPerfil(eu), listarPedidos(), listarCheckins({ limite: 30 })]);
+  return {
+    pedidos: pedidos.filter((p) => p.recebido),
+    checkins: checkins.filter((c) => c.usuario !== eu),
+    vistasEm: perfil.notificacoesVistasEm,
+  };
+}
+
+/** Número da bolinha do sininho: pedidos esperando resposta + check-ins de amigos ainda não vistos. */
+export async function contarNovidades(): Promise<number> {
+  const eu = await meuId();
+  const [perfil, pedidos] = await Promise.all([obterPerfil(eu), listarPedidos()]);
+  const { count, error } = await cliente()
+    .from('checkins')
+    .select('id', { count: 'exact', head: true })
+    .neq('usuario', eu)
+    .gt('criado_em', perfil.notificacoesVistasEm);
+  if (error) falhar(error);
+  return pedidos.filter((p) => p.recebido).length + (count ?? 0);
+}
+
+export async function marcarNotificacoesVistas() {
+  const { error } = await cliente()
+    .from('perfis')
+    .update({ notificacoes_vistas_em: new Date().toISOString() })
+    .eq('id', await meuId());
+  if (error) falhar(error);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Conta: e-mail e treinos salvos (para transferir para outro aparelho)
+
+export async function obterEmailDaConta(): Promise<string | null> {
+  const { data } = await cliente().auth.getSession();
+  return data.session?.user.email ?? null;
+}
+
+export interface TreinosSalvos {
+  rotinas: RotinaCopiada[];
+  /** Perfil do app (nome, idade, altura, peso, metas, avatar); nulo em cópias antigas. */
+  perfil: Perfil | null;
+  aparelho: string | null;
+  atualizadoEm: string;
+}
+
+export async function obterTreinosSalvos(): Promise<TreinosSalvos | null> {
+  const { data, error } = await cliente()
+    .from('treinos_salvos')
+    .select('rotinas, perfil, aparelho, atualizado_em')
+    .eq('usuario', await meuId())
+    .maybeSingle();
+  if (error) falhar(error);
+  return data
+    ? { rotinas: data.rotinas, perfil: data.perfil, aparelho: data.aparelho, atualizadoEm: data.atualizado_em }
+    : null;
+}
+
+/** Guarda na conta a cópia das rotinas e do perfil deste aparelho (substitui a cópia anterior). */
+export async function salvarTreinosNaConta(): Promise<TreinosSalvos> {
+  const [rotinas, perfil] = await Promise.all([copiarTreinosDoAparelho(), repo.obterPerfil()]);
+  const salvos = { rotinas, perfil, aparelho: NOME_DO_APARELHO, atualizadoEm: new Date().toISOString() };
+  const { error } = await cliente().from('treinos_salvos').upsert({
+    usuario: await meuId(),
+    rotinas: salvos.rotinas,
+    perfil: salvos.perfil,
+    aparelho: salvos.aparelho,
+    atualizado_em: salvos.atualizadoEm,
+  });
+  if (error) falhar(error);
+  return salvos;
 }

@@ -1,5 +1,5 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { ThemeProvider } from 'expo-router';
+import { router, ThemeProvider } from 'expo-router';
 import {
   Drawer,
   DrawerContentScrollView,
@@ -9,10 +9,11 @@ import {
 } from 'expo-router/drawer';
 import { StatusBar } from 'expo-status-bar';
 import type { ComponentProps } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { BotaoNotificacoes } from '@/components/botao-notificacoes';
 import { BotaoUsuario } from '@/components/botao-usuario';
 import { CORES, TEMA } from '@/lib/tema';
 
@@ -26,6 +27,8 @@ const TELAS: {
   botaoUsuario?: boolean;
   /** Fica fora da lista principal: aparece fixo no rodapé do menu. */
   rodape?: boolean;
+  /** Não aparece no menu (abre por um botão) e tem seta de voltar. */
+  oculta?: boolean;
 }[] = [
   { name: 'index', titulo: 'Início', icone: 'home-outline', botaoUsuario: true },
   { name: 'perfil', titulo: 'Perfil', icone: 'person-circle-outline' },
@@ -34,6 +37,7 @@ const TELAS: {
   { name: 'evolucao', titulo: 'Evolução', icone: 'trending-up-outline', cabecalhoProprio: true },
   { name: 'club', titulo: 'Heavy Club', icone: 'people-outline', cabecalhoProprio: true },
   { name: 'usuario', titulo: 'Configurações', icone: 'settings-outline', rodape: true },
+  { name: 'notificacoes', titulo: 'Notificações', icone: 'notifications-outline', oculta: true },
 ];
 
 function ConteudoMenu(props: DrawerContentComponentProps) {
@@ -74,17 +78,25 @@ export default function RootLayout() {
             drawerInactiveTintColor: CORES.texto,
             drawerStyle: { backgroundColor: CORES.fundo },
           }}>
-          {TELAS.map(({ name, titulo, icone, cabecalhoProprio, botaoUsuario, rodape }) => (
+          {TELAS.map(({ name, titulo, icone, cabecalhoProprio, botaoUsuario, rodape, oculta }) => (
             <Drawer.Screen
               key={name}
               name={name}
               options={{
                 title: titulo,
                 headerShown: !cabecalhoProprio,
-                headerRight: botaoUsuario ? () => <BotaoUsuario /> : undefined,
+                headerRight: botaoUsuario
+                  ? () => (
+                      <View style={styles.cantoDireito}>
+                        <BotaoNotificacoes />
+                        <BotaoUsuario />
+                      </View>
+                    )
+                  : undefined,
+                headerLeft: oculta ? () => <BotaoVoltar /> : undefined,
                 drawerIcon: ({ color, size }) => <Ionicons name={icone} color={color} size={size} />,
-                // Itens do rodapé são desenhados à parte em ConteudoMenu.
-                drawerItemStyle: rodape ? { display: 'none' } : undefined,
+                // Itens do rodapé são desenhados à parte em ConteudoMenu; os ocultos não aparecem.
+                drawerItemStyle: rodape || oculta ? { display: 'none' } : undefined,
               }}
             />
           ))}
@@ -94,7 +106,17 @@ export default function RootLayout() {
   );
 }
 
+function BotaoVoltar() {
+  return (
+    <Pressable accessibilityRole="button" accessibilityLabel="Voltar" hitSlop={8} onPress={() => router.back()} style={styles.voltar}>
+      <Ionicons name="arrow-back" size={24} color={CORES.texto} />
+    </Pressable>
+  );
+}
+
 const styles = StyleSheet.create({
+  cantoDireito: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  voltar: { marginLeft: 16, marginRight: 8 },
   menu: { flex: 1 },
   rodape: {
     borderTopWidth: StyleSheet.hairlineWidth,
