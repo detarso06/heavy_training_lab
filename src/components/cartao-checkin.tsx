@@ -1,6 +1,7 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Image } from 'expo-image';
-import { StyleSheet, Text, View } from 'react-native';
+import { router } from 'expo-router';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { BotaoIcone, Cartao } from '@/components/ui';
 import { obterAvatar } from '@/lib/avatares';
@@ -30,18 +31,27 @@ export function AvatarClub({ avatar, tamanho = 40 }: { avatar: string | null; ta
   );
 }
 
-/** Post de treino concluído: autor, foto, números do dia e PRs batidos. `onApagar` só nos posts do próprio usuário. */
+export function abrirCheckin(id: string) {
+  router.push({ pathname: '/club/checkin/[id]', params: { id } });
+}
+
+/**
+ * Post de treino concluído: autor, foto, números do dia e PRs batidos. `onApagar` só nos posts do próprio usuário.
+ * Com `comentarios` (feed, perfis), o cartão abre o post com os comentários ao ser tocado.
+ */
 export function CartaoCheckin({
   checkin,
   urlFoto,
   onApagar,
+  comentarios,
 }: {
   checkin: Checkin;
   urlFoto?: string;
   onApagar?: () => void;
+  comentarios?: number;
 }) {
-  return (
-    <Cartao style={styles.cartao}>
+  const cartao = (pressionado = false) => (
+    <Cartao style={[styles.cartao, { opacity: pressionado ? 0.8 : 1 }]}>
       <View style={styles.autor}>
         <AvatarClub avatar={checkin.autor.avatar} />
         <View style={styles.flex}>
@@ -79,7 +89,26 @@ export function CartaoCheckin({
           </Text>
         </View>
       ))}
+
+      {comentarios !== undefined && (
+        <View style={styles.rodape}>
+          <Ionicons name="chatbubble-outline" size={18} color={CORES.textoSuave} />
+          <Text style={styles.textoRodape}>
+            {comentarios === 0 ? 'Comentar' : comentarios === 1 ? '1 comentário' : `${comentarios} comentários`}
+          </Text>
+        </View>
+      )}
     </Cartao>
+  );
+
+  if (comentarios === undefined) return cartao();
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`Abrir o treino de ${checkin.autor.nome}`}
+      onPress={() => abrirCheckin(checkin.id)}>
+      {({ pressed }) => cartao(pressed)}
+    </Pressable>
   );
 }
 
@@ -106,4 +135,13 @@ const styles = StyleSheet.create({
   valor: { color: CORES.texto, fontSize: 14, fontWeight: '600' },
   pr: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   textoPr: { color: CORES.dourado, fontSize: 14, fontWeight: '700', flexShrink: 1 },
+  rodape: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: CORES.borda,
+    paddingTop: 10,
+  },
+  textoRodape: { color: CORES.textoSuave, fontSize: 14, fontWeight: '600' },
 });

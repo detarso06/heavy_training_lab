@@ -6,12 +6,20 @@ import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import { CartaoCheckin } from '@/components/cartao-checkin';
 import { Botao } from '@/components/ui';
 import { mensagemDeErro } from '@/lib/avisos';
-import { clubConfigurado, listarCheckins, urlsDasFotos, useUsuarioClub, type Checkin } from '@/lib/club';
+import {
+  clubConfigurado,
+  contarComentarios,
+  listarCheckins,
+  urlsDasFotos,
+  useUsuarioClub,
+  type Checkin,
+} from '@/lib/club';
 import { CORES } from '@/lib/tema';
 
 interface Feed {
   checkins: Checkin[];
   fotos: Map<string, string>;
+  comentarios: Map<string, number>;
 }
 
 /** Fim do Início: feed do Heavy Training Club (check-ins dos amigos e os seus). */
@@ -27,9 +35,12 @@ export function FeedClub() {
       (async () => {
         try {
           const checkins = await listarCheckins({ limite: 15 });
-          const fotos = await urlsDasFotos(checkins.flatMap((c) => (c.foto ? [c.foto] : [])));
+          const [fotos, comentarios] = await Promise.all([
+            urlsDasFotos(checkins.flatMap((c) => (c.foto ? [c.foto] : []))),
+            contarComentarios(checkins.map((c) => c.id)).catch(() => new Map<string, number>()),
+          ]);
           if (!ativo) return;
-          setFeed({ checkins, fotos });
+          setFeed({ checkins, fotos, comentarios });
           setErro(null);
         } catch (e) {
           if (ativo) setErro(mensagemDeErro(e));
@@ -82,7 +93,12 @@ export function FeedClub() {
         </>
       )}
       {feed?.checkins.map((c) => (
-        <CartaoCheckin key={c.id} checkin={c} urlFoto={c.foto ? feed.fotos.get(c.foto) : undefined} />
+        <CartaoCheckin
+          key={c.id}
+          checkin={c}
+          urlFoto={c.foto ? feed.fotos.get(c.foto) : undefined}
+          comentarios={feed.comentarios.get(c.id) ?? 0}
+        />
       ))}
     </View>
   );

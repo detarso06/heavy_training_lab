@@ -4,7 +4,7 @@ import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
-import { AvatarClub, quandoFoi } from '@/components/cartao-checkin';
+import { abrirCheckin, AvatarClub, quandoFoi } from '@/components/cartao-checkin';
 import { Botao, Cartao } from '@/components/ui';
 import { mensagemDeErro } from '@/lib/avisos';
 import {
@@ -30,7 +30,8 @@ export default function TelaNotificacoes() {
       <View style={styles.centro}>
         <Ionicons name="notifications-outline" size={48} color={CORES.dourado} style={styles.icone} />
         <Text style={styles.suave}>
-          As notificações chegam pelo Heavy Training Club: pedidos de amizade e treinos dos seus amigos.
+          As notificações chegam pelo Heavy Training Club: pedidos de amizade, treinos dos seus amigos e comentários
+          nos seus treinos.
         </Text>
         <Botao titulo="Entrar no Club" icone="people-outline" onPress={() => router.navigate('/club')} />
       </View>
@@ -93,7 +94,7 @@ function Lista() {
     }
   };
 
-  const vazio = dados.pedidos.length === 0 && dados.checkins.length === 0;
+  const vazio = dados.pedidos.length === 0 && dados.checkins.length === 0 && dados.comentarios.length === 0;
 
   return (
     <ScrollView contentContainerStyle={styles.conteudo}>
@@ -118,6 +119,28 @@ function Lista() {
         </Cartao>
       ))}
 
+      {dados.comentarios.length > 0 && <Text style={styles.secao}>Comentários nos seus treinos</Text>}
+      {dados.comentarios.map((c) => {
+        const novo = c.criadoEm > dados.vistasEm;
+        return (
+          <Pressable key={c.id} accessibilityRole="button" onPress={() => abrirCheckin(c.checkin)}>
+            {({ pressed }) => (
+              <Cartao style={[styles.item, novo && styles.novo, { opacity: pressed ? 0.7 : 1 }]}>
+                <AvatarClub avatar={c.autor.avatar} />
+                <View style={styles.flex}>
+                  <Text style={styles.texto}>
+                    <Text style={styles.nome}>{c.autor.nome}</Text> comentou no seu treino {c.treino}:{' '}
+                    <Text style={styles.citacao}>“{c.texto}”</Text>
+                  </Text>
+                  <Text style={styles.quando}>{quandoFoi(c.criadoEm)}</Text>
+                </View>
+                {novo && <View style={styles.bolinha} />}
+              </Cartao>
+            )}
+          </Pressable>
+        );
+      })}
+
       {dados.checkins.length > 0 && <Text style={styles.secao}>Treinos dos amigos</Text>}
       {dados.checkins.map((c) => {
         const novo = c.criadoEm > dados.vistasEm;
@@ -126,7 +149,7 @@ function Lista() {
           <Pressable
             key={c.id}
             accessibilityRole="button"
-            onPress={() => router.push({ pathname: '/club/amigo/[id]', params: { id: c.usuario } })}>
+            onPress={() => abrirCheckin(c.id)}>
             {({ pressed }) => (
               <Cartao style={[styles.item, novo && styles.novo, { opacity: pressed ? 0.7 : 1 }]}>
                 <AvatarClub avatar={c.autor.avatar} />
@@ -161,6 +184,7 @@ const styles = StyleSheet.create({
   flex: { flex: 1 },
   texto: { color: CORES.textoSuave, fontSize: 15 },
   nome: { color: CORES.texto, fontWeight: '700' },
+  citacao: { color: CORES.texto, fontStyle: 'italic' },
   quando: { color: CORES.textoSuave, fontSize: 13, marginTop: 2 },
   miniatura: { width: 48, height: 60, borderRadius: 6 },
   bolinha: { width: 10, height: 10, borderRadius: 5, backgroundColor: CORES.vermelho },

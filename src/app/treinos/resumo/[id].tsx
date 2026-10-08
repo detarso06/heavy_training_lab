@@ -129,6 +129,22 @@ export default function TelaResumo() {
         <Numero icone="barbell-outline" rotulo="Peso total" valor={formatarKg(total.volume)} />
       </View>
 
+      {clubConfigurado && (
+        <Botao
+          titulo="Postar no Club"
+          icone="people-outline"
+          onPress={() => router.push({ pathname: '/treinos/postar/[id]', params: { id: String(sessao.id) } })}
+          style={styles.voltar}
+        />
+      )}
+      <Botao
+        titulo="Voltar ao início"
+        variante={clubConfigurado ? 'secundario' : 'primario'}
+        icone="home-outline"
+        onPress={voltarAoInicio}
+        style={styles.voltar}
+      />
+
       <Text style={styles.secao}>Exercícios</Text>
       {exercicios.map((e, i) => {
         const r = resumirSeries(e.series);
@@ -150,22 +166,6 @@ export default function TelaResumo() {
           </Cartao>
         );
       })}
-
-      {clubConfigurado && (
-        <Botao
-          titulo="Postar no Heavy Training Club"
-          icone="people-outline"
-          onPress={() => router.push({ pathname: '/treinos/postar/[id]', params: { id: String(sessao.id) } })}
-          style={styles.voltar}
-        />
-      )}
-      <Botao
-        titulo="Voltar ao início"
-        variante={clubConfigurado ? 'secundario' : 'primario'}
-        icone="home-outline"
-        onPress={voltarAoInicio}
-        style={styles.voltar}
-      />
     </ScrollView>
   );
 }

@@ -29,6 +29,7 @@ const TRADUCOES: [RegExp, string][] = [
   [/token has expired|otp.*(expired|invalid)|invalid.*(otp|token)/i, 'Código inválido ou vencido. Peça um novo.'],
   [/should be different from the old/i, 'A senha nova precisa ser diferente da antiga.'],
   [/failed to fetch|network request failed/i, 'Sem conexão com o Club. Verifique a internet.'],
+  [/cannot coerce the result to a single json object/i, 'Esse perfil não está disponível para você.'],
 ];
 
 /** Lança o erro do Supabase em português (as funções do banco já respondem em português). */
@@ -272,6 +273,36 @@ export async function enviarPedido(codigo: string): Promise<{ status: 'enviado' 
   return data as { status: 'enviado' | 'aceita'; nome: string };
 }
 
+/** Pedido direto, sem código: para quem comentou num check-in que eu vejo (supabase/010). */
+export async function enviarPedidoPara(usuario: string): Promise<{ status: 'enviado' | 'aceita'; nome: string }> {
+  const { data, error } = await cliente().rpc('enviar_pedido_para', { p_usuario: usuario });
+  if (error) falhar(error);
+  return data as { status: 'enviado' | 'aceita'; nome: string };
+}
+
+export type Vinculo = 'amigos' | 'enviado' | 'recebido' | null;
+
+export interface PerfilBasico {
+  id: string;
+  nome: string;
+  avatar: string | null;
+  criadoEm: string;
+  vinculo: Vinculo;
+}
+
+/**
+ * Nome, avatar e vínculo comigo de alguém que ainda pode não ser amigo (ex.: quem comentou num check-in
+ * de um amigo em comum). Null se não houver nenhum caminho até essa pessoa.
+ */
+export async function obterPerfilBasico(usuario: string): Promise<PerfilBasico | null> {
+  const { data, error } = await cliente().rpc('perfil_basico', { p_usuario: usuario });
+  if (error) falhar(error);
+  const linha = (data as { id: string; nome: string; avatar: string | null; criado_em: string; vinculo: Vinculo }[])[0];
+  return linha
+    ? { id: linha.id, nome: linha.nome, avatar: linha.avatar, criadoEm: linha.criado_em, vinculo: linha.vinculo }
+    : null;
+}
+
 export interface Pedido {
   outro: string;
   nome: string;
@@ -415,7 +446,22 @@ export async function listarCheckins(opcoes: { usuario?: string; limite?: number
   if (opcoes.usuario) consulta = consulta.eq('usuario', opcoes.usuario);
   const { data, error } = await consulta.returns<LinhaCheckin[]>();
   if (error) falhar(error);
-  return data.map((c) => ({
+  return data.map(paraCheckin);
+}
+
+/** Um check-in pelo id (null se apagado ou se o dono deixou de mostrar). */
+export async function obterCheckin(id: string): Promise<Checkin | null> {
+  const { data, error } = await cliente()
+    .from('checkins')
+    .select('*, perfis(nome, avatar)')
+    .eq('id', id)
+    .maybeSingle<LinhaCheckin>();
+  if (error) falhar(error);
+  return data ? paraCheckin(data) : null;
+}
+
+function paraCheckin(c: LinhaCheckin): Checkin {
+  return {
     id: c.id,
     usuario: c.usuario,
     autor: c.perfis ?? { nome: 'Atleta', avatar: null },
@@ -428,7 +474,7 @@ export async function listarCheckins(opcoes: { usuario?: string; limite?: number
     prs: c.prs,
     foto: c.foto,
     legenda: c.legenda,
-  }));
+  };
 }
 
 /** Links temporários (1 hora) para exibir as fotos do bucket privado. */
@@ -446,36 +492,158 @@ export async function apagarCheckin(checkin: Checkin) {
 }
 
 // ---------------------------------------------------------------------------------------------
+// Comentários nos check-ins (supabase/009_comentarios.sql)
+
+export const LIMITE_COMENTARIO = 500;
+
+export interface Comentario {
+  id: string;
+  usuario: string;
+  autor: { nome: string; avatar: string | null };
+  /** Nulo quando bloqueado: quem escreveu não é seu amigo (o servidor nem manda o texto). */
+  texto: string | null;
+  bloqueado: boolean;
+  criadoEm: string;
+}
+
+/** Mais antigos primeiro (como numa conversa). */
+export async function listarComentarios(checkin: string): Promise<Comentario[]> {
+  const { data, error } = await cliente().rpc('listar_comentarios', { p_checkin: checkin });
+  if (error) falhar(error);
+  return (
+    data as {
+      id: string;
+      usuario: string;
+      nome: string;
+      avatar: string | null;
+      texto: string | null;
+      bloqueado?: boolean;
+      criado_em: string;
+    }[]
+  ).map((c) => ({
+    id: c.id,
+    usuario: c.usuario,
+    autor: { nome: c.nome, avatar: c.avatar },
+    texto: c.texto,
+    bloqueado: c.bloqueado ?? false,
+    criadoEm: c.criado_em,
+  }));
+}
+
+export async function comentar(checkin: string, texto: string) {
+  const limpo = texto.trim();
+  if (!limpo) throw new Error('Escreva alguma coisa antes de enviar.');
+  const { error } = await cliente()
+    .from('comentarios')
+    .insert({ checkin, usuario: await meuId(), texto: limpo.slice(0, LIMITE_COMENTARIO) });
+  if (error) falhar(error);
+}
+
+export async function apagarComentario(id: string) {
+  const { error } = await cliente().from('comentarios').delete().eq('id', id);
+  if (error) falhar(error);
+}
+
+/** Quantos comentários cada check-in tem (para os cartões do feed). */
+export async function contarComentarios(checkins: string[]): Promise<Map<string, number>> {
+  const contagem = new Map<string, number>();
+  if (checkins.length === 0) return contagem;
+  const { data, error } = await cliente().from('comentarios').select('checkin').in('checkin', checkins);
+  if (error) falhar(error);
+  for (const { checkin } of data) contagem.set(checkin, (contagem.get(checkin) ?? 0) + 1);
+  return contagem;
+}
+
+// ---------------------------------------------------------------------------------------------
 // Notificações (sininho): pedidos de amizade recebidos e check-ins novos dos amigos
+
+export interface ComentarioRecebido {
+  id: string;
+  checkin: string;
+  treino: string;
+  autor: { nome: string; avatar: string | null };
+  texto: string;
+  criadoEm: string;
+}
 
 export interface Notificacoes {
   pedidos: Pedido[];
   /** Check-ins recentes dos amigos (os novos têm criadoEm > vistasEm). */
   checkins: Checkin[];
+  /** Comentários dos outros nos meus check-ins (quem comenta no meu post é sempre meu amigo). */
+  comentarios: ComentarioRecebido[];
   vistasEm: string;
+}
+
+interface LinhaComentarioRecebido {
+  id: string;
+  checkin: string;
+  texto: string;
+  criado_em: string;
+  perfis: { nome: string; avatar: string | null } | null;
+  checkins: { treino: string } | null;
+}
+
+async function listarComentariosRecebidos(eu: string, limite: number): Promise<ComentarioRecebido[]> {
+  const { data, error } = await cliente()
+    .from('comentarios')
+    .select('id, checkin, texto, criado_em, perfis(nome, avatar), checkins!inner(usuario, treino)')
+    .eq('checkins.usuario', eu)
+    .neq('usuario', eu)
+    .order('criado_em', { ascending: false })
+    .limit(limite)
+    .returns<LinhaComentarioRecebido[]>();
+  if (error) falhar(error);
+  return data.map((c) => ({
+    id: c.id,
+    checkin: c.checkin,
+    treino: c.checkins?.treino ?? 'Treino',
+    autor: c.perfis ?? { nome: 'Atleta', avatar: null },
+    texto: c.texto,
+    criadoEm: c.criado_em,
+  }));
 }
 
 export async function listarNotificacoes(): Promise<Notificacoes> {
   const eu = await meuId();
-  const [perfil, pedidos, checkins] = await Promise.all([obterPerfil(eu), listarPedidos(), listarCheckins({ limite: 30 })]);
+  const [perfil, pedidos, checkins, comentarios] = await Promise.all([
+    obterPerfil(eu),
+    listarPedidos(),
+    listarCheckins({ limite: 30 }),
+    // Sem a tabela de comentários (supabase/009 ainda não aplicado), o resto do sininho segue funcionando.
+    listarComentariosRecebidos(eu, 30).catch(() => []),
+  ]);
   return {
     pedidos: pedidos.filter((p) => p.recebido),
     checkins: checkins.filter((c) => c.usuario !== eu),
+    comentarios,
     vistasEm: perfil.notificacoesVistasEm,
   };
 }
 
-/** Número da bolinha do sininho: pedidos esperando resposta + check-ins de amigos ainda não vistos. */
+/**
+ * Número da bolinha do sininho: pedidos esperando resposta + check-ins de amigos e comentários nos meus
+ * check-ins ainda não vistos.
+ */
 export async function contarNovidades(): Promise<number> {
   const eu = await meuId();
   const [perfil, pedidos] = await Promise.all([obterPerfil(eu), listarPedidos()]);
-  const { count, error } = await cliente()
-    .from('checkins')
-    .select('id', { count: 'exact', head: true })
-    .neq('usuario', eu)
-    .gt('criado_em', perfil.notificacoesVistasEm);
-  if (error) falhar(error);
-  return pedidos.filter((p) => p.recebido).length + (count ?? 0);
+  const [checkins, comentarios] = await Promise.all([
+    cliente()
+      .from('checkins')
+      .select('id', { count: 'exact', head: true })
+      .neq('usuario', eu)
+      .gt('criado_em', perfil.notificacoesVistasEm),
+    cliente()
+      .from('comentarios')
+      .select('id, checkins!inner(usuario)', { count: 'exact', head: true })
+      .eq('checkins.usuario', eu)
+      .neq('usuario', eu)
+      .gt('criado_em', perfil.notificacoesVistasEm),
+  ]);
+  if (checkins.error) falhar(checkins.error);
+  // Erro nos comentários (ex.: supabase/009 ainda não aplicado) só deixa de contá-los.
+  return pedidos.filter((p) => p.recebido).length + (checkins.count ?? 0) + (comentarios.count ?? 0);
 }
 
 export async function marcarNotificacoesVistas() {

@@ -11,6 +11,7 @@ export default function ClubLayout() {
       <Stack.Screen name="index" options={{ title: 'Heavy Club', headerLeft: () => <BotaoMenu /> }} />
       <Stack.Screen name="privacidade" options={{ title: 'Privacidade' }} />
       <Stack.Screen name="amigo/[id]" options={{ title: 'Perfil' }} />
+      <Stack.Screen name="checkin/[id]" options={{ title: 'Treino' }} />
     </Stack>
   );
 }

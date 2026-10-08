@@ -127,7 +127,7 @@ export default function TelaPostar() {
 
       {erro && <Text style={styles.erro}>{erro}</Text>}
       <Botao
-        titulo={postando ? 'Postando…' : 'Postar no Heavy Training Club'}
+        titulo={postando ? 'Postando…' : 'Postar no Club'}
         icone="send-outline"
         onPress={postar}
         desabilitado={postando}

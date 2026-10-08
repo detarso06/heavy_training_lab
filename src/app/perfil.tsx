@@ -14,6 +14,7 @@ import {
   apagarCheckin,
   atualizarMeuPerfil,
   clubConfigurado,
+  contarComentarios,
   listarCheckins,
   obterPerfil,
   publicarRetrato,
@@ -34,6 +35,7 @@ interface Dados {
   recordes: Recorde[];
   checkins: Checkin[];
   fotos: Map<string, string>;
+  comentarios: Map<string, number>;
 }
 
 /** Meu perfil no Heavy Training Club: sequência, PRs escolhidos (editáveis) e meus check-ins. */
@@ -72,7 +74,10 @@ function MeuPerfil({ usuario }: { usuario: string }) {
           repo.obterRotinaAtiva(),
           listarCheckins({ usuario }),
         ]);
-        const fotos = await urlsDasFotos(checkins.flatMap((c) => (c.foto ? [c.foto] : [])));
+        const [fotos, comentarios] = await Promise.all([
+          urlsDasFotos(checkins.flatMap((c) => (c.foto ? [c.foto] : []))),
+          contarComentarios(checkins.map((c) => c.id)).catch(() => new Map<string, number>()),
+        ]);
         if (!aindaAtivo()) return;
         setDados({
           perfil,
@@ -81,6 +86,7 @@ function MeuPerfil({ usuario }: { usuario: string }) {
           recordes: calcularRecordes(sessoes, series, nomes),
           checkins,
           fotos,
+          comentarios,
         });
         setErro(null);
       } catch (e) {
@@ -110,7 +116,7 @@ function MeuPerfil({ usuario }: { usuario: string }) {
   }
   if (!dados) return <ActivityIndicator style={styles.carregando} />;
 
-  const { perfil, sequencia, rotina, recordes, checkins, fotos } = dados;
+  const { perfil, sequencia, rotina, recordes, checkins, fotos, comentarios } = dados;
   const desde = new Date(perfil.criadoEm).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
   const visiveis = recordes.filter((r) => perfil.prsVisiveis.includes(r.exercicio));
 
@@ -239,13 +245,14 @@ function MeuPerfil({ usuario }: { usuario: string }) {
 
       <Text style={styles.secao}>Meus check-ins</Text>
       {checkins.length === 0 && (
-        <Text style={styles.suave}>Ao finalizar um treino, toque em “Postar no Heavy Training Club” no resumo.</Text>
+        <Text style={styles.suave}>Ao finalizar um treino, toque em “Postar no Club” no resumo.</Text>
       )}
       {checkins.map((c) => (
         <CartaoCheckin
           key={c.id}
           checkin={c}
           urlFoto={c.foto ? fotos.get(c.foto) : undefined}
+          comentarios={comentarios.get(c.id) ?? 0}
           onApagar={() => apagar(c)}
         />
       ))}

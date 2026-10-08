@@ -1,6 +1,6 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ComponentProps } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -10,6 +10,14 @@ import { Botao, Campo, Cartao } from '@/components/ui';
 import { repo, type FichaExercicioDetalhe, type Serie, type Sessao } from '@/db';
 import { lerNumero } from '@/lib/metas';
 import { voltarAoInicio } from '@/lib/navegacao';
+import {
+  lerModoSessao,
+  lerPulados,
+  limparPulados,
+  salvarModoSessao,
+  salvarPulados,
+  type ModoSessao,
+} from '@/lib/preferencias-sessao';
 import { formatarCronometro, linhasDoExercicio, sugestaoParaLinha, type LinhaPlanejada } from '@/lib/sessao';
 import { CORES } from '@/lib/tema';
 
@@ -43,8 +51,11 @@ export default function TelaSessao() {
   /** `n` muda a cada descanso novo, para o timer recomeçar. */
   const [descanso, setDescanso] = useState<{ segundos: number; n: number } | null>(null);
   const [agora, setAgora] = useState(() => Date.now());
-  /** Exercício mostrado na tela (um por vez). */
+  /** Exercício mostrado na tela no modo "um por vez". */
   const [atual, setAtual] = useState(0);
+  const [modo, setModo] = useState<ModoSessao>(lerModoSessao);
+  /** `exercicioId` dos exercícios pulados nesta sessão. */
+  const [pulados, setPulados] = useState<number[]>(() => lerPulados(sessaoId));
 
   useEffect(() => {
     const t = setInterval(() => setAgora(Date.now()), 1000);
@@ -84,7 +95,12 @@ export default function TelaSessao() {
       });
       if (!ativo) return;
       setDados({ sessao, itens });
-      const pendente = itens.findIndex((fe) => linhasDoExercicio(fe).some((l) => !f[chave(fe.exercicioId, l.numero)]));
+      const puladosSalvos = lerPulados(sessaoId);
+      const pendente = itens.findIndex(
+        (fe) =>
+          !puladosSalvos.includes(fe.exercicioId) &&
+          linhasDoExercicio(fe).some((l) => !f[chave(fe.exercicioId, l.numero)])
+      );
       setAtual(Math.max(0, pendente));
       setFeitas(f);
       setValores(v);
@@ -102,6 +118,7 @@ export default function TelaSessao() {
     });
     if (!ok) return;
     await repo.removerSessao(sessaoId);
+    limparPulados(sessaoId);
     voltarAoInicio();
   };
 
@@ -117,7 +134,13 @@ export default function TelaSessao() {
   }
 
   const { sessao, itens } = dados;
-  const totalSeries = itens.reduce((t, fe) => t + linhasDoExercicio(fe).length, 0);
+  const estaPulado = (fe: FichaExercicioDetalhe) => pulados.includes(fe.exercicioId);
+  const temPendente = (fe: FichaExercicioDetalhe) =>
+    linhasDoExercicio(fe).some((l) => !feitas[chave(fe.exercicioId, l.numero)]);
+  const feitasDe = (fe: FichaExercicioDetalhe) =>
+    linhasDoExercicio(fe).filter((l) => feitas[chave(fe.exercicioId, l.numero)]).length;
+  // Do exercício pulado, só contam as séries que chegaram a ser confirmadas.
+  const totalSeries = itens.reduce((t, fe) => t + (estaPulado(fe) ? feitasDe(fe) : linhasDoExercicio(fe).length), 0);
   const totalFeitas = Object.keys(feitas).length;
   const tudoFeito = totalSeries > 0 && totalFeitas >= totalSeries;
 
@@ -172,11 +195,157 @@ export default function TelaSessao() {
 
   const irPara = (i: number) => setAtual(Math.min(itens.length - 1, Math.max(0, i)));
 
+  const trocarModo = (novo: ModoSessao) => {
+    setModo(novo);
+    salvarModoSessao(novo);
+  };
+
+  const atualizarPulados = (ids: number[]) => {
+    setPulados(ids);
+    salvarPulados(sessaoId, ids);
+  };
+
+  /** As séries já confirmadas continuam valendo; o resto fica fora do resumo e do gráfico. */
+  const pular = (fe: FichaExercicioDetalhe, i: number) => {
+    const novos = [...pulados, fe.exercicioId];
+    atualizarPulados(novos);
+    if (modo !== 'um-por-vez') return;
+    // Vai para o próximo exercício que ainda falta (depois deste e, se não houver, antes).
+    const ordem = [...itens.keys()].slice(i + 1).concat([...itens.keys()].slice(0, i));
+    const proximo = ordem.find((j) => !novos.includes(itens[j].exercicioId) && temPendente(itens[j]));
+    if (proximo !== undefined) irPara(proximo);
+  };
+
+  const retomar = (fe: FichaExercicioDetalhe) => atualizarPulados(pulados.filter((id) => id !== fe.exercicioId));
+
+  const cartaoDoExercicio = (fe: FichaExercicioDetalhe, i: number) => {
+    const linhas = linhasDoExercicio(fe);
+    const feitasDoExercicio = feitasDe(fe);
+    const completo = linhas.length > 0 && feitasDoExercicio === linhas.length;
+    const pulado = estaPulado(fe);
+    return (
+      <Cartao
+        key={fe.id}
+        style={[styles.cartao, completo && { borderColor: CORES.dourado }, pulado && styles.cartaoPulado]}>
+        <View style={styles.cabecalho}>
+          <View style={styles.flex}>
+            <Text style={styles.nome}>{fe.exercicio.nome}</Text>
+            <Text style={styles.detalhe}>
+              {feitasDoExercicio}/{linhas.length} séries
+              {fe.exercicio.grupoMuscular ? ` · ${fe.exercicio.grupoMuscular}` : ''}
+            </Text>
+          </View>
+          {fe.descansoSeg > 0 && (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Iniciar descanso"
+              onPress={() => setDescanso((d) => ({ segundos: fe.descansoSeg, n: (d?.n ?? 0) + 1 }))}
+              style={({ pressed }) => [styles.botaoDescanso, { opacity: pressed ? 0.6 : 1 }]}>
+              <Ionicons name="timer-outline" size={18} color={CORES.dourado} />
+              <Text style={styles.textoDescanso}>{formatarCronometro(fe.descansoSeg * 1000)}</Text>
+            </Pressable>
+          )}
+        </View>
+
+        <View style={styles.linha}>
+          <Text style={[styles.colSerie, styles.legenda]}>Série</Text>
+          <Text style={[styles.colNumero, styles.legenda]}>Kg</Text>
+          <Text style={[styles.colNumero, styles.legenda]}>Reps</Text>
+          <View style={styles.colCheck} />
+        </View>
+
+        {linhas.map((linha) => {
+          const k = chave(fe.exercicioId, linha.numero);
+          const feita = !!feitas[k];
+          const bloqueada = pulado && !feita;
+          return (
+            <View
+              key={k}
+              style={[styles.linha, feita && styles.linhaFeita, bloqueada && styles.linhaPulada]}
+              pointerEvents={bloqueada ? 'none' : 'auto'}>
+              <View style={styles.colSerie}>
+                <Text style={[styles.rotuloSerie, linha.tipo === 'validas' && { color: CORES.texto }]}>
+                  {ROTULO_CURTO[linha.tipo]} {linha.ordemNoTipo}
+                </Text>
+                {!!linha.repsAlvo && <Text style={styles.alvo}>alvo {linha.repsAlvo}</Text>}
+              </View>
+              <View style={styles.colNumero}>
+                <Campo
+                  style={styles.campo}
+                  value={valores[k]?.carga ?? ''}
+                  onChangeText={(t) => alterarValor(k, 'carga', t)}
+                  onBlur={() => salvarEdicao(k)}
+                  keyboardType="decimal-pad"
+                  placeholder="kg"
+                  selectTextOnFocus
+                  accessibilityLabel={`Peso da série ${linha.numero} de ${fe.exercicio.nome}`}
+                />
+              </View>
+              <View style={styles.colNumero}>
+                <Campo
+                  style={[styles.campo, invalidas[k] && { borderColor: CORES.vermelho }]}
+                  value={valores[k]?.reps ?? ''}
+                  onChangeText={(t) => alterarValor(k, 'reps', t)}
+                  onBlur={() => salvarEdicao(k)}
+                  keyboardType="number-pad"
+                  placeholder="reps"
+                  selectTextOnFocus
+                  accessibilityLabel={`Repetições da série ${linha.numero} de ${fe.exercicio.nome}`}
+                />
+              </View>
+              <Pressable
+                accessibilityRole="checkbox"
+                accessibilityState={{ checked: feita }}
+                accessibilityLabel={`Confirmar série ${linha.numero} de ${fe.exercicio.nome}`}
+                onPress={() => (feita ? desfazer(k) : confirmarSerie(fe, linha))}
+                style={({ pressed }) => [
+                  styles.colCheck,
+                  styles.check,
+                  feita && { backgroundColor: CORES.dourado, borderColor: CORES.dourado },
+                  { opacity: pressed ? 0.6 : 1 },
+                ]}>
+                <Ionicons name="checkmark" size={22} color={feita ? CORES.sobreDestaque : CORES.textoSuave} />
+              </Pressable>
+            </View>
+          );
+        })}
+        {linhas.some((l) => invalidas[chave(fe.exercicioId, l.numero)]) && (
+          <Text style={styles.aviso}>Informe quantas repetições você fez.</Text>
+        )}
+        {completo && modo === 'um-por-vez' && i < itens.length - 1 && (
+          <Botao
+            titulo={`Próximo: ${itens[i + 1].exercicio.nome}`}
+            icone="arrow-forward"
+            onPress={() => irPara(i + 1)}
+            style={styles.proximo}
+          />
+        )}
+        {pulado ? (
+          <View style={styles.avisoPulado}>
+            <Text style={styles.textoPulado}>
+              {feitasDoExercicio > 0
+                ? 'Pulado. As séries confirmadas continuam valendo; o resto fica de fora.'
+                : 'Pulado. Não entra no resumo nem no gráfico deste treino.'}
+            </Text>
+            <LinkAcao icone="arrow-undo-outline" titulo="Retomar exercício" cor={CORES.dourado} onPress={() => retomar(fe)} />
+          </View>
+        ) : (
+          !completo && (
+            <LinkAcao
+              icone="play-skip-forward-outline"
+              titulo="Pular exercício"
+              cor={CORES.textoSuave}
+              onPress={() => pular(fe, i)}
+            />
+          )
+        )}
+      </Cartao>
+    );
+  };
+
   const finalizar = async () => {
-    // Exercícios com alguma série ainda não confirmada.
-    const pendentes = itens.filter((fe) =>
-      linhasDoExercicio(fe).some((l) => !feitas[chave(fe.exercicioId, l.numero)])
-    ).length;
+    // Exercícios com alguma série ainda não confirmada (os pulados não contam).
+    const pendentes = itens.filter((fe) => !estaPulado(fe) && temPendente(fe)).length;
     if (pendentes > 0) {
       const ok = await confirmar({
         titulo: 'Finalizar treino?',
@@ -188,6 +357,7 @@ export default function TelaSessao() {
       if (!ok) return;
     }
     await repo.encerrarSessao(sessaoId);
+    limparPulados(sessaoId);
     router.replace({ pathname: '/treinos/resumo/[id]', params: { id: String(sessaoId) } });
   };
 
@@ -201,6 +371,15 @@ export default function TelaSessao() {
           <Ionicons name="stopwatch-outline" size={22} color={CORES.dourado} />
           <Text style={styles.tempo}>{formatarCronometro(agora - sessao.inicio)}</Text>
         </View>
+        <View style={styles.seletorModo} accessibilityRole="radiogroup" accessibilityLabel="Modo de exibição">
+          <OpcaoModo
+            icone="square-outline"
+            rotulo="Um exercício por vez"
+            ativo={modo === 'um-por-vez'}
+            onPress={() => trocarModo('um-por-vez')}
+          />
+          <OpcaoModo icone="list" rotulo="Todos os exercícios" ativo={modo === 'lista'} onPress={() => trocarModo('lista')} />
+        </View>
       </View>
       <View style={styles.trilho}>
         <View style={[styles.preenchido, { width: `${totalSeries ? (totalFeitas / totalSeries) * 100 : 0}%` }]} />
@@ -209,118 +388,33 @@ export default function TelaSessao() {
       <ScrollView
         contentContainerStyle={[styles.conteudo, { paddingBottom: (descanso ? 150 : 40) + insets.bottom }]}
         keyboardShouldPersistTaps="handled">
-        <View style={styles.navegacao}>
-          <BotaoSeta icone="chevron-back" rotulo="Exercício anterior" desabilitado={atual === 0} onPress={() => irPara(atual - 1)} />
+        {modo === 'um-por-vez' ? (
+          <View style={styles.navegacao}>
+            <BotaoSeta
+              icone="chevron-back"
+              rotulo="Exercício anterior"
+              desabilitado={atual === 0}
+              onPress={() => irPara(atual - 1)}
+            />
+            <Text style={styles.indice}>
+              Exercício {atual + 1} de {itens.length}
+            </Text>
+            <BotaoSeta
+              icone="chevron-forward"
+              rotulo="Próximo exercício"
+              desabilitado={atual === itens.length - 1}
+              onPress={() => irPara(atual + 1)}
+            />
+          </View>
+        ) : (
           <Text style={styles.indice}>
-            Exercício {atual + 1} de {itens.length}
+            {itens.length} {itens.length === 1 ? 'exercício' : 'exercícios'}
           </Text>
-          <BotaoSeta
-            icone="chevron-forward"
-            rotulo="Próximo exercício"
-            desabilitado={atual === itens.length - 1}
-            onPress={() => irPara(atual + 1)}
-          />
-        </View>
+        )}
 
-        {[itens[atual]].filter(Boolean).map((fe) => {
-          const i = atual;
-          const linhas = linhasDoExercicio(fe);
-          const feitasDoExercicio = linhas.filter((l) => feitas[chave(fe.exercicioId, l.numero)]).length;
-          const completo = linhas.length > 0 && feitasDoExercicio === linhas.length;
-          return (
-            <Cartao key={fe.id} style={[styles.cartao, completo && { borderColor: CORES.dourado }]}>
-              <View style={styles.cabecalho}>
-                <View style={styles.flex}>
-                  <Text style={styles.nome}>{fe.exercicio.nome}</Text>
-                  <Text style={styles.detalhe}>
-                    {feitasDoExercicio}/{linhas.length} séries
-                    {fe.exercicio.grupoMuscular ? ` · ${fe.exercicio.grupoMuscular}` : ''}
-                  </Text>
-                </View>
-                {fe.descansoSeg > 0 && (
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel="Iniciar descanso"
-                    onPress={() => setDescanso((d) => ({ segundos: fe.descansoSeg, n: (d?.n ?? 0) + 1 }))}
-                    style={({ pressed }) => [styles.botaoDescanso, { opacity: pressed ? 0.6 : 1 }]}>
-                    <Ionicons name="timer-outline" size={18} color={CORES.dourado} />
-                    <Text style={styles.textoDescanso}>{formatarCronometro(fe.descansoSeg * 1000)}</Text>
-                  </Pressable>
-                )}
-              </View>
-
-              <View style={styles.linha}>
-                <Text style={[styles.colSerie, styles.legenda]}>Série</Text>
-                <Text style={[styles.colNumero, styles.legenda]}>Kg</Text>
-                <Text style={[styles.colNumero, styles.legenda]}>Reps</Text>
-                <View style={styles.colCheck} />
-              </View>
-
-              {linhas.map((linha) => {
-                const k = chave(fe.exercicioId, linha.numero);
-                const feita = !!feitas[k];
-                return (
-                  <View key={k} style={[styles.linha, feita && styles.linhaFeita]}>
-                    <View style={styles.colSerie}>
-                      <Text style={[styles.rotuloSerie, linha.tipo === 'validas' && { color: CORES.texto }]}>
-                        {ROTULO_CURTO[linha.tipo]} {linha.ordemNoTipo}
-                      </Text>
-                      {!!linha.repsAlvo && <Text style={styles.alvo}>alvo {linha.repsAlvo}</Text>}
-                    </View>
-                    <View style={styles.colNumero}>
-                      <Campo
-                        style={styles.campo}
-                        value={valores[k]?.carga ?? ''}
-                        onChangeText={(t) => alterarValor(k, 'carga', t)}
-                        onBlur={() => salvarEdicao(k)}
-                        keyboardType="decimal-pad"
-                        placeholder="kg"
-                        selectTextOnFocus
-                        accessibilityLabel={`Peso da série ${linha.numero} de ${fe.exercicio.nome}`}
-                      />
-                    </View>
-                    <View style={styles.colNumero}>
-                      <Campo
-                        style={[styles.campo, invalidas[k] && { borderColor: CORES.vermelho }]}
-                        value={valores[k]?.reps ?? ''}
-                        onChangeText={(t) => alterarValor(k, 'reps', t)}
-                        onBlur={() => salvarEdicao(k)}
-                        keyboardType="number-pad"
-                        placeholder="reps"
-                        selectTextOnFocus
-                        accessibilityLabel={`Repetições da série ${linha.numero} de ${fe.exercicio.nome}`}
-                      />
-                    </View>
-                    <Pressable
-                      accessibilityRole="checkbox"
-                      accessibilityState={{ checked: feita }}
-                      accessibilityLabel={`Confirmar série ${linha.numero} de ${fe.exercicio.nome}`}
-                      onPress={() => (feita ? desfazer(k) : confirmarSerie(fe, linha))}
-                      style={({ pressed }) => [
-                        styles.colCheck,
-                        styles.check,
-                        feita && { backgroundColor: CORES.dourado, borderColor: CORES.dourado },
-                        { opacity: pressed ? 0.6 : 1 },
-                      ]}>
-                      <Ionicons name="checkmark" size={22} color={feita ? CORES.sobreDestaque : CORES.textoSuave} />
-                    </Pressable>
-                  </View>
-                );
-              })}
-              {linhas.some((l) => invalidas[chave(fe.exercicioId, l.numero)]) && (
-                <Text style={styles.aviso}>Informe quantas repetições você fez.</Text>
-              )}
-              {completo && i < itens.length - 1 && (
-                <Botao
-                  titulo={`Próximo: ${itens[i + 1].exercicio.nome}`}
-                  icone="arrow-forward"
-                  onPress={() => irPara(i + 1)}
-                  style={styles.proximo}
-                />
-              )}
-            </Cartao>
-          );
-        })}
+        {modo === 'um-por-vez'
+          ? [itens[atual]].filter(Boolean).map((fe) => cartaoDoExercicio(fe, atual))
+          : itens.map((fe, i) => cartaoDoExercicio(fe, i))}
 
         <Botao
           titulo="Finalizar treino"
@@ -412,7 +506,66 @@ const styles = StyleSheet.create({
   },
   proximo: { marginTop: 8 },
   dica: { color: CORES.textoSuave, fontSize: 13, textAlign: 'center' },
+  seletorModo: { flexDirection: 'row', borderWidth: 1.5, borderColor: CORES.borda, borderRadius: 999, padding: 3 },
+  opcaoModo: { width: 40, height: 34, borderRadius: 999, alignItems: 'center', justifyContent: 'center' },
+  cartaoPulado: { borderStyle: 'dashed', borderColor: CORES.textoSuave },
+  linhaPulada: { opacity: 0.35 },
+  avisoPulado: { gap: 4 },
+  textoPulado: { color: CORES.textoSuave, fontSize: 13 },
+  linkAcao: { flexDirection: 'row', alignItems: 'center', alignSelf: 'center', gap: 6, paddingVertical: 8 },
+  textoLinkAcao: { fontSize: 14, fontWeight: '700' },
 });
+
+function OpcaoModo({
+  icone,
+  rotulo,
+  ativo,
+  onPress,
+}: {
+  icone: 'square-outline' | 'list';
+  rotulo: string;
+  ativo: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      accessibilityRole="radio"
+      accessibilityLabel={rotulo}
+      accessibilityState={{ checked: ativo }}
+      onPress={onPress}
+      hitSlop={4}
+      style={({ pressed }) => [
+        styles.opcaoModo,
+        ativo && { backgroundColor: CORES.dourado },
+        { opacity: pressed ? 0.6 : 1 },
+      ]}>
+      <Ionicons name={icone} size={20} color={ativo ? CORES.sobreDestaque : CORES.textoSuave} />
+    </Pressable>
+  );
+}
+
+function LinkAcao({
+  icone,
+  titulo,
+  cor,
+  onPress,
+}: {
+  icone: ComponentProps<typeof Ionicons>['name'];
+  titulo: string;
+  cor: string;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      onPress={onPress}
+      hitSlop={6}
+      style={({ pressed }) => [styles.linkAcao, { opacity: pressed ? 0.6 : 1 }]}>
+      <Ionicons name={icone} size={18} color={cor} />
+      <Text style={[styles.textoLinkAcao, { color: cor }]}>{titulo}</Text>
+    </Pressable>
+  );
+}
 
 function BotaoSeta({
   icone,
