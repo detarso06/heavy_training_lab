@@ -3,7 +3,7 @@ import { useFocusEffect } from 'expo-router';
 import { useCallback, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 
-import { AvatarClub, CartaoCheckin } from '@/components/cartao-checkin';
+import { AvatarClub, CartaoCheckin, CheckinsPorDia } from '@/components/cartao-checkin';
 import { CartaoSequencia } from '@/components/cartao-sequencia';
 import { useConfirmacao } from '@/components/dialogo-confirmacao';
 import { FormularioConta } from '@/components/formulario-conta';
@@ -247,15 +247,18 @@ function MeuPerfil({ usuario }: { usuario: string }) {
       {checkins.length === 0 && (
         <Text style={styles.suave}>Ao finalizar um treino, toque em “Postar no Club” no resumo.</Text>
       )}
-      {checkins.map((c) => (
-        <CartaoCheckin
-          key={c.id}
-          checkin={c}
-          urlFoto={c.foto ? fotos.get(c.foto) : undefined}
-          comentarios={comentarios.get(c.id) ?? 0}
-          onApagar={() => apagar(c)}
-        />
-      ))}
+      <CheckinsPorDia
+        checkins={checkins}
+        renderizar={(c) => (
+          <CartaoCheckin
+            key={c.id}
+            checkin={c}
+            urlFoto={c.foto ? fotos.get(c.foto) : undefined}
+            comentarios={comentarios.get(c.id) ?? 0}
+            onApagar={() => apagar(c)}
+          />
+        )}
+      />
 
       {erro && <Text style={styles.erro}>{erro}</Text>}
     </ScrollView>

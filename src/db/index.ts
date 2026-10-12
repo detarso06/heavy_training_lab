@@ -2,6 +2,7 @@
 import * as SQLite from 'expo-sqlite';
 
 import type {
+  CardioFeito,
   Exercicio,
   Ficha,
   FichaExercicio,
@@ -119,6 +120,22 @@ const MIGRACOES = [
   `
   ALTER TABLE fichas ADD COLUMN descanso INTEGER NOT NULL DEFAULT 0;
   `,
+  // Dia de cardio: atividade e minutos planejados (nulos nos treinos e descansos).
+  `
+  ALTER TABLE fichas ADD COLUMN cardio_atividade TEXT;
+  ALTER TABLE fichas ADD COLUMN cardio_min INTEGER;
+  `,
+  // Cardio dentro do treino: item da lista de exercícios com minutos planejados, e o tempo feito na sessão.
+  `
+  ALTER TABLE ficha_exercicios ADD COLUMN cardio_min INTEGER;
+  CREATE TABLE sessao_cardios (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    sessao_id INTEGER NOT NULL REFERENCES sessoes(id) ON DELETE CASCADE,
+    exercicio_id INTEGER NOT NULL REFERENCES exercicios(id) ON DELETE RESTRICT,
+    minutos INTEGER NOT NULL,
+    concluido_em INTEGER NOT NULL
+  );
+  `,
 ];
 
 let dbPromise: Promise<SQLite.SQLiteDatabase> | null = null;
@@ -144,7 +161,8 @@ function getDb() {
 
 const COLS_EXERCICIO = `id, nome, grupo_muscular AS grupoMuscular, video_url AS videoUrl, observacoes`;
 const COLS_ROTINA = `id, nome, descricao, ativa, criada_em AS criadaEm`;
-const COLS_FICHA = `id, rotina_id AS rotinaId, nome, descricao, ordem, descanso, criada_em AS criadaEm`;
+const COLS_FICHA = `id, rotina_id AS rotinaId, nome, descricao, ordem, descanso,
+  cardio_atividade AS cardioAtividade, cardio_min AS cardioMin, criada_em AS criadaEm`;
 const COLS_SESSAO = `id, ficha_id AS fichaId, nome, inicio, fim`;
 const COLS_SERIE = `id, sessao_id AS sessaoId, exercicio_id AS exercicioId, numero, tipo, carga,
   repeticoes, concluida_em AS concluidaEm`;
@@ -155,10 +173,15 @@ function paraRotina({ ativa, ...r }: LinhaRotina): Rotina {
   return { ...r, ativa: ativa === 1 };
 }
 
-type LinhaFicha = Omit<Ficha, 'descanso'> & { descanso: number };
+type LinhaFicha = Omit<Ficha, 'descanso' | 'cardio'> & {
+  descanso: number;
+  cardioAtividade: string | null;
+  cardioMin: number | null;
+};
 
-function paraFicha({ descanso, ...f }: LinhaFicha): Ficha {
-  return { ...f, descanso: descanso === 1 };
+function paraFicha({ descanso, cardioAtividade, cardioMin, ...f }: LinhaFicha): Ficha {
+  const cardio = cardioAtividade === null ? null : { atividade: cardioAtividade, minutos: cardioMin ?? 0 };
+  return { ...f, descanso: descanso === 1, cardio };
 }
 
 interface LinhaFichaExercicio {
@@ -173,12 +196,14 @@ interface LinhaFichaExercicio {
   series: number;
   repeticoes: string;
   descansoSeg: number;
+  cardioMin: number | null;
 }
 
 const COLS_FICHA_EXERCICIO = `fe.id, fe.ficha_id AS fichaId, fe.exercicio_id AS exercicioId, fe.ordem,
   fe.aquecimento_series AS aqSeries, fe.aquecimento_reps AS aqReps,
   fe.preparatoria_series AS prepSeries, fe.preparatoria_reps AS prepReps,
-  fe.series, fe.repeticoes, fe.descanso_seg AS descansoSeg`;
+  fe.series, fe.repeticoes, fe.descanso_seg AS descansoSeg, fe.cardio_min AS cardioMin`;
+const COLS_CARDIO = `id, sessao_id AS sessaoId, exercicio_id AS exercicioId, minutos, concluido_em AS concluidoEm`;
 
 function paraFichaExercicio(l: LinhaFichaExercicio): FichaExercicio {
   return {
@@ -190,6 +215,7 @@ function paraFichaExercicio(l: LinhaFichaExercicio): FichaExercicio {
     preparatoria: { series: l.prepSeries, repeticoes: l.prepReps },
     validas: { series: l.series, repeticoes: l.repeticoes },
     descansoSeg: l.descansoSeg,
+    cardioMin: l.cardioMin,
   };
 }
 
@@ -246,7 +272,11 @@ export const repo: Repositorio = {
   },
   async removerExercicio(id) {
     const db = await getDb();
-    const usado = await db.getFirstAsync('SELECT 1 FROM series WHERE exercicio_id = ? LIMIT 1', id);
+    const usado = await db.getFirstAsync(
+      'SELECT 1 FROM series WHERE exercicio_id = ? UNION ALL SELECT 1 FROM sessao_cardios WHERE exercicio_id = ? LIMIT 1',
+      id,
+      id
+    );
     if (usado) throw new Error('Este exercício já tem treinos registrados e não pode ser apagado.');
     await db.runAsync('DELETE FROM exercicios WHERE id = ?', id);
   },
@@ -326,19 +356,30 @@ export const repo: Repositorio = {
     );
     const ordem = (max?.m ?? -1) + 1;
     const descanso = dados.descanso ?? false;
+    const cardio = dados.cardio ?? null;
     const r = await db.runAsync(
-      'INSERT INTO fichas (rotina_id, nome, descricao, ordem, descanso, criada_em) VALUES (?, ?, ?, ?, ?, ?)',
+      `INSERT INTO fichas (rotina_id, nome, descricao, ordem, descanso, cardio_atividade, cardio_min, criada_em)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       dados.rotinaId,
       dados.nome,
       dados.descricao,
       ordem,
       descanso ? 1 : 0,
+      cardio?.atividade ?? null,
+      cardio?.minutos ?? null,
       criadaEm
     );
-    return { id: r.lastInsertRowId, ordem, criadaEm, ...dados, descanso };
+    return { id: r.lastInsertRowId, ordem, criadaEm, ...dados, descanso, cardio };
   },
-  atualizarFicha(id, dados) {
-    return atualizar('fichas', id, dados, { nome: 'nome', descricao: 'descricao' });
+  atualizarFicha(id, { cardio, ...dados }) {
+    const colunasCardio =
+      cardio === undefined ? {} : { cardioAtividade: cardio?.atividade ?? null, cardioMin: cardio?.minutos ?? null };
+    return atualizar(
+      'fichas',
+      id,
+      { ...dados, ...colunasCardio },
+      { nome: 'nome', descricao: 'descricao', cardioAtividade: 'cardio_atividade', cardioMin: 'cardio_min' }
+    );
   },
   async removerFicha(id) {
     const db = await getDb();
@@ -382,8 +423,8 @@ export const repo: Repositorio = {
     const r = await db.runAsync(
       `INSERT INTO ficha_exercicios (ficha_id, exercicio_id, ordem,
          aquecimento_series, aquecimento_reps, preparatoria_series, preparatoria_reps,
-         series, repeticoes, descanso_seg)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         series, repeticoes, descanso_seg, cardio_min)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       dados.fichaId,
       dados.exercicioId,
       ordem,
@@ -393,9 +434,10 @@ export const repo: Repositorio = {
       dados.preparatoria.repeticoes,
       dados.validas.series,
       dados.validas.repeticoes,
-      dados.descansoSeg
+      dados.descansoSeg,
+      dados.cardioMin ?? null
     );
-    return { id: r.lastInsertRowId, ordem, ...dados };
+    return { id: r.lastInsertRowId, ordem, ...dados, cardioMin: dados.cardioMin ?? null };
   },
   atualizarExercicioDaFicha(id, dados) {
     return atualizar(
@@ -409,6 +451,7 @@ export const repo: Repositorio = {
         series: dados.validas?.series,
         repeticoes: dados.validas?.repeticoes,
         descansoSeg: dados.descansoSeg,
+        cardioMin: dados.cardioMin,
       },
       {
         aqSeries: 'aquecimento_series',
@@ -418,6 +461,7 @@ export const repo: Repositorio = {
         series: 'series',
         repeticoes: 'repeticoes',
         descansoSeg: 'descanso_seg',
+        cardioMin: 'cardio_min',
       }
     );
   },
@@ -455,6 +499,10 @@ export const repo: Repositorio = {
   async encerrarSessao(id) {
     const db = await getDb();
     await db.runAsync('UPDATE sessoes SET fim = ? WHERE id = ? AND fim IS NULL', Date.now(), id);
+  },
+  async atualizarInicioSessao(id, inicio) {
+    const db = await getDb();
+    await db.runAsync('UPDATE sessoes SET inicio = ? WHERE id = ? AND fim IS NULL', inicio, id);
   },
   async obterSessao(id) {
     const db = await getDb();
@@ -508,6 +556,33 @@ export const repo: Repositorio = {
       sessaoId
     );
   },
+  async registrarCardio(dados) {
+    const db = await getDb();
+    const concluidoEm = Date.now();
+    const r = await db.runAsync(
+      'INSERT INTO sessao_cardios (sessao_id, exercicio_id, minutos, concluido_em) VALUES (?, ?, ?, ?)',
+      dados.sessaoId,
+      dados.exercicioId,
+      dados.minutos,
+      concluidoEm
+    );
+    return { id: r.lastInsertRowId, concluidoEm, ...dados };
+  },
+  async atualizarCardio(id, minutos) {
+    const db = await getDb();
+    await db.runAsync('UPDATE sessao_cardios SET minutos = ? WHERE id = ?', minutos, id);
+  },
+  async removerCardio(id) {
+    const db = await getDb();
+    await db.runAsync('DELETE FROM sessao_cardios WHERE id = ?', id);
+  },
+  async listarCardiosDaSessao(sessaoId) {
+    const db = await getDb();
+    return db.getAllAsync<CardioFeito>(
+      `SELECT ${COLS_CARDIO} FROM sessao_cardios WHERE sessao_id = ? ORDER BY concluido_em`,
+      sessaoId
+    );
+  },
   async ultimasSeriesDoExercicio(exercicioId, ignorarSessaoId = -1) {
     const db = await getDb();
     return db.getAllAsync<Serie>(
@@ -557,6 +632,7 @@ export const repo: Repositorio = {
     await db.withTransactionAsync(async () => {
       await db.execAsync(`
         DELETE FROM series;
+        DELETE FROM sessao_cardios;
         DELETE FROM sessoes;
         DELETE FROM ficha_exercicios;
         DELETE FROM fichas;

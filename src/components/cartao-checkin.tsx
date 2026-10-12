@@ -1,6 +1,7 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Image } from 'expo-image';
-import { router } from 'expo-router';
+import { router, usePathname } from 'expo-router';
+import { Fragment, type ReactNode } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { BotaoIcone, Cartao } from '@/components/ui';
@@ -31,8 +32,50 @@ export function AvatarClub({ avatar, tamanho = 40 }: { avatar: string | null; ta
   );
 }
 
-export function abrirCheckin(id: string) {
-  router.push({ pathname: '/club/checkin/[id]', params: { id } });
+/** `de`: tela de onde o post foi aberto, para o "voltar" levar de volta para lá. */
+export function abrirCheckin(id: string, de?: string) {
+  router.push({ pathname: '/club/checkin/[id]', params: de ? { id, de } : { id } });
+}
+
+/** "Hoje", "Ontem" ou "sábado, 10/10" (com o ano, se não for o atual). */
+export function tituloDoDia(iso: string, agora = new Date()) {
+  const data = new Date(iso);
+  const ontem = new Date(agora);
+  ontem.setDate(agora.getDate() - 1);
+  if (data.toDateString() === agora.toDateString()) return 'Hoje';
+  if (data.toDateString() === ontem.toDateString()) return 'Ontem';
+  const semana = data.toLocaleDateString('pt-BR', { weekday: 'long' });
+  const dia = data.toLocaleDateString('pt-BR', {
+    day: '2-digit',
+    month: '2-digit',
+    ...(data.getFullYear() === agora.getFullYear() ? {} : { year: 'numeric' }),
+  });
+  return `${semana}, ${dia}`;
+}
+
+/** Lista de check-ins separada por dia (mais recentes primeiro, como vêm do servidor). */
+export function CheckinsPorDia({
+  checkins,
+  renderizar,
+}: {
+  checkins: Checkin[];
+  renderizar: (checkin: Checkin) => ReactNode;
+}) {
+  const grupos: { dia: string; itens: Checkin[] }[] = [];
+  for (const c of checkins) {
+    const dia = new Date(c.criadoEm).toDateString();
+    const grupo = grupos.at(-1);
+    if (grupo?.dia === dia) grupo.itens.push(c);
+    else grupos.push({ dia, itens: [c] });
+  }
+  return grupos.map((g) => (
+    <Fragment key={g.dia}>
+      <Text style={styles.tituloDia} accessibilityRole="header">
+        {tituloDoDia(g.itens[0].criadoEm)}
+      </Text>
+      {g.itens.map(renderizar)}
+    </Fragment>
+  ));
 }
 
 /**
@@ -50,6 +93,7 @@ export function CartaoCheckin({
   onApagar?: () => void;
   comentarios?: number;
 }) {
+  const pathname = usePathname();
   const cartao = (pressionado = false) => (
     <Cartao style={[styles.cartao, { opacity: pressionado ? 0.8 : 1 }]}>
       <View style={styles.autor}>
@@ -106,7 +150,7 @@ export function CartaoCheckin({
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={`Abrir o treino de ${checkin.autor.nome}`}
-      onPress={() => abrirCheckin(checkin.id)}>
+      onPress={() => abrirCheckin(checkin.id, pathname)}>
       {({ pressed }) => cartao(pressed)}
     </Pressable>
   );
@@ -122,6 +166,14 @@ function Numero({ icone, valor }: { icone: 'stopwatch-outline' | 'layers-outline
 }
 
 const styles = StyleSheet.create({
+  tituloDia: {
+    color: CORES.textoSuave,
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
+    marginTop: 8,
+  },
   cartao: { gap: 10 },
   autor: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   flex: { flex: 1 },

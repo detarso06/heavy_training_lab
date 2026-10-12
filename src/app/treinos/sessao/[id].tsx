@@ -4,16 +4,29 @@ import { useEffect, useState, type ComponentProps } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { CartaoCardio } from '@/components/cartao-cardio';
 import { useConfirmacao } from '@/components/dialogo-confirmacao';
+import { SessaoCardio } from '@/components/sessao-cardio';
 import { TimerDescanso } from '@/components/timer-descanso';
 import { Botao, Campo, Cartao } from '@/components/ui';
-import { repo, type FichaExercicioDetalhe, type Serie, type Sessao } from '@/db';
-import { lerNumero } from '@/lib/metas';
+import {
+  repo,
+  type CardioFeito,
+  type CardioPlanejado,
+  type FichaExercicioDetalhe,
+  type Serie,
+  type Sessao,
+} from '@/db';
+import { somarCardiosDoTreinoNaMeta } from '@/lib/cardio';
+import { formatarMinutos, lerNumero } from '@/lib/metas';
 import { voltarAoInicio } from '@/lib/navegacao';
 import {
+  lerAvisoDescanso,
   lerModoSessao,
   lerPulados,
+  limparCronometrosCardio,
   limparPulados,
+  salvarAvisoDescanso,
   salvarModoSessao,
   salvarPulados,
   type ModoSessao,
@@ -46,6 +59,8 @@ export default function TelaSessao() {
     null
   );
   const [feitas, setFeitas] = useState<Record<string, Serie>>({});
+  /** Cardios do treino já concluídos, por `exercicioId`. */
+  const [cardiosFeitos, setCardiosFeitos] = useState<Record<number, CardioFeito>>({});
   const [valores, setValores] = useState<Record<string, Valores>>({});
   const [invalidas, setInvalidas] = useState<Record<string, boolean>>({});
   /** `n` muda a cada descanso novo, para o timer recomeçar. */
@@ -54,8 +69,11 @@ export default function TelaSessao() {
   /** Exercício mostrado na tela no modo "um por vez". */
   const [atual, setAtual] = useState(0);
   const [modo, setModo] = useState<ModoSessao>(lerModoSessao);
+  const [aviso, setAviso] = useState(lerAvisoDescanso);
   /** `exercicioId` dos exercícios pulados nesta sessão. */
   const [pulados, setPulados] = useState<number[]>(() => lerPulados(sessaoId));
+  /** Sessão de um dia de cardio: a tela é outra (só cronômetro). */
+  const [cardio, setCardio] = useState<{ sessao: Sessao; plano: CardioPlanejado } | null>(null);
 
   useEffect(() => {
     const t = setInterval(() => setAgora(Date.now()), 1000);
@@ -74,10 +92,18 @@ export default function TelaSessao() {
         if (ativo) setDados('sem-treino');
         return;
       }
-      const [itens, registradas] = await Promise.all([
+      const ficha = await repo.obterFicha(sessao.fichaId);
+      if (ficha?.cardio) {
+        if (ativo) setCardio({ sessao, plano: ficha.cardio });
+        return;
+      }
+      const [itens, registradas, cardios] = await Promise.all([
         repo.listarExerciciosDaFicha(sessao.fichaId),
         repo.listarSeriesDaSessao(sessaoId),
+        repo.listarCardiosDaSessao(sessaoId),
       ]);
+      const c: Record<number, CardioFeito> = {};
+      for (const cardio of cardios) c[cardio.exercicioId] = cardio;
       const anteriores = await Promise.all(itens.map((i) => repo.ultimasSeriesDoExercicio(i.exercicioId, sessaoId)));
 
       const f: Record<string, Serie> = {};
@@ -99,10 +125,13 @@ export default function TelaSessao() {
       const pendente = itens.findIndex(
         (fe) =>
           !puladosSalvos.includes(fe.exercicioId) &&
-          linhasDoExercicio(fe).some((l) => !f[chave(fe.exercicioId, l.numero)])
+          (fe.cardioMin !== null
+            ? !c[fe.exercicioId]
+            : linhasDoExercicio(fe).some((l) => !f[chave(fe.exercicioId, l.numero)]))
       );
       setAtual(Math.max(0, pendente));
       setFeitas(f);
+      setCardiosFeitos(c);
       setValores(v);
     })();
     return () => {
@@ -119,9 +148,11 @@ export default function TelaSessao() {
     if (!ok) return;
     await repo.removerSessao(sessaoId);
     limparPulados(sessaoId);
+    limparCronometrosCardio(sessaoId);
     voltarAoInicio();
   };
 
+  if (cardio) return <SessaoCardio sessao={cardio.sessao} plano={cardio.plano} />;
   if (dados === null) return <ActivityIndicator style={styles.carregando} />;
   if (dados === 'sem-treino') {
     return (
@@ -135,13 +166,22 @@ export default function TelaSessao() {
 
   const { sessao, itens } = dados;
   const estaPulado = (fe: FichaExercicioDetalhe) => pulados.includes(fe.exercicioId);
+  // Cada cardio do treino conta como um item a fazer, como se fosse uma série.
+  const ehCardio = (fe: FichaExercicioDetalhe) => fe.cardioMin !== null;
   const temPendente = (fe: FichaExercicioDetalhe) =>
-    linhasDoExercicio(fe).some((l) => !feitas[chave(fe.exercicioId, l.numero)]);
+    ehCardio(fe)
+      ? !cardiosFeitos[fe.exercicioId]
+      : linhasDoExercicio(fe).some((l) => !feitas[chave(fe.exercicioId, l.numero)]);
   const feitasDe = (fe: FichaExercicioDetalhe) =>
-    linhasDoExercicio(fe).filter((l) => feitas[chave(fe.exercicioId, l.numero)]).length;
+    ehCardio(fe)
+      ? cardiosFeitos[fe.exercicioId]
+        ? 1
+        : 0
+      : linhasDoExercicio(fe).filter((l) => feitas[chave(fe.exercicioId, l.numero)]).length;
+  const totalDe = (fe: FichaExercicioDetalhe) => (ehCardio(fe) ? 1 : linhasDoExercicio(fe).length);
   // Do exercício pulado, só contam as séries que chegaram a ser confirmadas.
-  const totalSeries = itens.reduce((t, fe) => t + (estaPulado(fe) ? feitasDe(fe) : linhasDoExercicio(fe).length), 0);
-  const totalFeitas = Object.keys(feitas).length;
+  const totalSeries = itens.reduce((t, fe) => t + (estaPulado(fe) ? feitasDe(fe) : totalDe(fe)), 0);
+  const totalFeitas = Object.keys(feitas).length + Object.keys(cardiosFeitos).length;
   const tudoFeito = totalSeries > 0 && totalFeitas >= totalSeries;
 
   const alterarValor = (k: string, campo: keyof Valores, texto: string) => {
@@ -193,11 +233,46 @@ export default function TelaSessao() {
     setFeitas((a) => ({ ...a, [k]: { ...serie, carga, repeticoes: reps } }));
   };
 
+  const concluirCardio = async (fe: FichaExercicioDetalhe, minutos: number) => {
+    const cardio = await repo.registrarCardio({ sessaoId, exercicioId: fe.exercicioId, minutos });
+    setCardiosFeitos((a) => ({ ...a, [fe.exercicioId]: cardio }));
+  };
+
+  const desfazerCardio = async (fe: FichaExercicioDetalhe) => {
+    const cardio = cardiosFeitos[fe.exercicioId];
+    if (!cardio) return;
+    const ok = await confirmar({
+      titulo: 'Desfazer cardio?',
+      destaque: `${fe.exercicio.nome} · ${formatarMinutos(cardio.minutos)}`,
+      mensagem: 'Ele volta a ficar pendente e o cronômetro recomeça do zero.',
+      textoConfirmar: 'Desfazer',
+      icone: 'arrow-undo-outline',
+    });
+    if (!ok) return;
+    await repo.removerCardio(cardio.id);
+    setCardiosFeitos((a) => {
+      const { [fe.exercicioId]: _removido, ...resto } = a;
+      return resto;
+    });
+  };
+
+  const alterarMinutosCardio = (fe: FichaExercicioDetalhe, minutos: number) => {
+    const cardio = cardiosFeitos[fe.exercicioId];
+    if (!cardio) return;
+    repo.atualizarCardio(cardio.id, minutos);
+    setCardiosFeitos((a) => ({ ...a, [fe.exercicioId]: { ...cardio, minutos } }));
+  };
+
   const irPara = (i: number) => setAtual(Math.min(itens.length - 1, Math.max(0, i)));
 
   const trocarModo = (novo: ModoSessao) => {
     setModo(novo);
     salvarModoSessao(novo);
+  };
+
+  const alternarAviso = () => {
+    setAviso(!aviso);
+    salvarAvisoDescanso(!aviso);
   };
 
   const atualizarPulados = (ids: number[]) => {
@@ -218,7 +293,49 @@ export default function TelaSessao() {
 
   const retomar = (fe: FichaExercicioDetalhe) => atualizarPulados(pulados.filter((id) => id !== fe.exercicioId));
 
+  const cartaoDoCardio = (fe: FichaExercicioDetalhe, i: number) => {
+    const feito = cardiosFeitos[fe.exercicioId];
+    const pulado = estaPulado(fe);
+    return (
+      <CartaoCardio
+        key={fe.id}
+        sessaoId={sessaoId}
+        fe={fe}
+        feito={feito}
+        aviso={aviso}
+        pulado={pulado}
+        onConcluir={(minutos) => concluirCardio(fe, minutos)}
+        onDesfazer={() => desfazerCardio(fe)}
+        onAlterarMinutos={(minutos) => alterarMinutosCardio(fe, minutos)}>
+        {feito && modo === 'um-por-vez' && i < itens.length - 1 && (
+          <Botao
+            titulo={`Próximo: ${itens[i + 1].exercicio.nome}`}
+            icone="arrow-forward"
+            onPress={() => irPara(i + 1)}
+            style={styles.proximo}
+          />
+        )}
+        {pulado ? (
+          <View style={styles.avisoPulado}>
+            <Text style={styles.textoPulado}>Pulado. Não entra no resumo nem na meta de cardio.</Text>
+            <LinkAcao icone="arrow-undo-outline" titulo="Retomar cardio" cor={CORES.dourado} onPress={() => retomar(fe)} />
+          </View>
+        ) : (
+          !feito && (
+            <LinkAcao
+              icone="play-skip-forward-outline"
+              titulo="Pular cardio"
+              cor={CORES.textoSuave}
+              onPress={() => pular(fe, i)}
+            />
+          )
+        )}
+      </CartaoCardio>
+    );
+  };
+
   const cartaoDoExercicio = (fe: FichaExercicioDetalhe, i: number) => {
+    if (ehCardio(fe)) return cartaoDoCardio(fe, i);
     const linhas = linhasDoExercicio(fe);
     const feitasDoExercicio = feitasDe(fe);
     const completo = linhas.length > 0 && feitasDoExercicio === linhas.length;
@@ -357,7 +474,10 @@ export default function TelaSessao() {
       if (!ok) return;
     }
     await repo.encerrarSessao(sessaoId);
+    const encerrada = await repo.obterSessao(sessaoId);
+    if (encerrada) await somarCardiosDoTreinoNaMeta(encerrada);
     limparPulados(sessaoId);
+    limparCronometrosCardio(sessaoId);
     router.replace({ pathname: '/treinos/resumo/[id]', params: { id: String(sessaoId) } });
   };
 
@@ -371,14 +491,34 @@ export default function TelaSessao() {
           <Ionicons name="stopwatch-outline" size={22} color={CORES.dourado} />
           <Text style={styles.tempo}>{formatarCronometro(agora - sessao.inicio)}</Text>
         </View>
-        <View style={styles.seletorModo} accessibilityRole="radiogroup" accessibilityLabel="Modo de exibição">
-          <OpcaoModo
-            icone="square-outline"
-            rotulo="Um exercício por vez"
-            ativo={modo === 'um-por-vez'}
-            onPress={() => trocarModo('um-por-vez')}
-          />
-          <OpcaoModo icone="list" rotulo="Todos os exercícios" ativo={modo === 'lista'} onPress={() => trocarModo('lista')} />
+        <View style={styles.direita}>
+          <Pressable
+            accessibilityRole="switch"
+            accessibilityLabel="Avisar quando o descanso acabar"
+            accessibilityState={{ checked: aviso }}
+            onPress={alternarAviso}
+            hitSlop={4}
+            style={({ pressed }) => [styles.botaoAviso, aviso && styles.botaoAvisoLigado, { opacity: pressed ? 0.6 : 1 }]}>
+            <Ionicons
+              name={aviso ? 'notifications' : 'notifications-off-outline'}
+              size={20}
+              color={aviso ? CORES.dourado : CORES.textoSuave}
+            />
+          </Pressable>
+          <View style={styles.seletorModo} accessibilityRole="radiogroup" accessibilityLabel="Modo de exibição">
+            <OpcaoModo
+              icone="square-outline"
+              rotulo="Um exercício por vez"
+              ativo={modo === 'um-por-vez'}
+              onPress={() => trocarModo('um-por-vez')}
+            />
+            <OpcaoModo
+              icone="list"
+              rotulo="Todos os exercícios"
+              ativo={modo === 'lista'}
+              onPress={() => trocarModo('lista')}
+            />
+          </View>
         </View>
       </View>
       <View style={styles.trilho}>
@@ -432,6 +572,7 @@ export default function TelaSessao() {
         <TimerDescanso
           key={descanso.n}
           segundos={descanso.segundos}
+          aviso={aviso}
           margemInferior={insets.bottom}
           onFechar={() => setDescanso(null)}
         />
@@ -506,6 +647,17 @@ const styles = StyleSheet.create({
   },
   proximo: { marginTop: 8 },
   dica: { color: CORES.textoSuave, fontSize: 13, textAlign: 'center' },
+  direita: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  botaoAviso: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    borderWidth: 1.5,
+    borderColor: CORES.borda,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  botaoAvisoLigado: { borderColor: CORES.dourado },
   seletorModo: { flexDirection: 'row', borderWidth: 1.5, borderColor: CORES.borda, borderRadius: 999, padding: 3 },
   opcaoModo: { width: 40, height: 34, borderRadius: 999, alignItems: 'center', justifyContent: 'center' },
   cartaoPulado: { borderStyle: 'dashed', borderColor: CORES.textoSuave },

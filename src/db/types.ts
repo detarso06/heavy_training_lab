@@ -33,7 +33,18 @@ export interface Ficha {
    * concluída e sem séries: conta como feito na semana e na sequência.
    */
   descanso: boolean;
+  /**
+   * Dia de cardio no rodízio (sem exercícios): atividade e minutos planejados. Nulo nos treinos
+   * e descansos. A sessão de cardio tem só cronômetro; ao finalizar, os minutos somam na meta da semana.
+   */
+  cardio: CardioPlanejado | null;
   criadaEm: number;
+}
+
+export interface CardioPlanejado {
+  /** Ex.: "Esteira". */
+  atividade: string;
+  minutos: number;
 }
 
 export type TipoSerie = 'aquecimento' | 'preparatoria' | 'validas';
@@ -54,6 +65,11 @@ export interface FichaExercicio {
   preparatoria: PlanoSeries;
   validas: PlanoSeries;
   descansoSeg: number;
+  /**
+   * Cardio dentro do treino: minutos planejados (nulo nos exercícios de musculação). O exercício é a
+   * atividade (grupo "Cardio", ex.: Esteira) e não tem séries; na sessão vira um cronômetro.
+   */
+  cardioMin: number | null;
 }
 
 export interface FichaExercicioDetalhe extends FichaExercicio {
@@ -84,6 +100,15 @@ export interface Serie {
   concluidaEm: number;
 }
 
+/** Cardio feito dentro de uma sessão de treino (minutos gravados ao concluir o cronômetro). */
+export interface CardioFeito {
+  id: Id;
+  sessaoId: Id;
+  exercicioId: Id;
+  minutos: number;
+  concluidoEm: number;
+}
+
 /** Dados do usuário (registro único). Campos nulos = ainda não preenchidos. */
 export interface Perfil {
   nome: string | null;
@@ -103,8 +128,11 @@ export type TipoMeta = 'cardio' | 'agua';
 
 export type NovoExercicio = Omit<Exercicio, 'id'>;
 export type NovaRotina = Pick<Rotina, 'nome' | 'descricao'>;
-export type NovaFicha = Pick<Ficha, 'rotinaId' | 'nome' | 'descricao'> & { descanso?: boolean };
-export type NovoFichaExercicio = Omit<FichaExercicio, 'id' | 'ordem'>;
+export type NovaFicha = Pick<Ficha, 'rotinaId' | 'nome' | 'descricao'> & {
+  descanso?: boolean;
+  cardio?: CardioPlanejado | null;
+};
+export type NovoFichaExercicio = Omit<FichaExercicio, 'id' | 'ordem' | 'cardioMin'> & { cardioMin?: number | null };
 export type NovaSerie = Omit<Serie, 'id' | 'concluidaEm'>;
 
 /** Operações de dados. Implementada com SQLite (celular) e localStorage (web). */
@@ -131,7 +159,7 @@ export interface Repositorio {
   listarFichas(rotinaId: Id): Promise<Ficha[]>;
   obterFicha(id: Id): Promise<Ficha | null>;
   criarFicha(dados: NovaFicha): Promise<Ficha>;
-  atualizarFicha(id: Id, dados: Partial<Pick<Ficha, 'nome' | 'descricao'>>): Promise<void>;
+  atualizarFicha(id: Id, dados: Partial<Pick<Ficha, 'nome' | 'descricao' | 'cardio'>>): Promise<void>;
   removerFicha(id: Id): Promise<void>;
   /** Recebe os ids das fichas na nova ordem do rodízio. */
   reordenarFichas(idsNaOrdem: Id[]): Promise<void>;
@@ -140,7 +168,7 @@ export interface Repositorio {
   adicionarExercicioNaFicha(dados: NovoFichaExercicio): Promise<FichaExercicio>;
   atualizarExercicioDaFicha(
     id: Id,
-    dados: Partial<Pick<FichaExercicio, TipoSerie | 'descansoSeg'>>
+    dados: Partial<Pick<FichaExercicio, TipoSerie | 'descansoSeg' | 'cardioMin'>>
   ): Promise<void>;
   removerExercicioDaFicha(id: Id): Promise<void>;
   /** Recebe os ids de ficha_exercicios na nova ordem. */
@@ -148,6 +176,8 @@ export interface Repositorio {
 
   iniciarSessao(fichaId: Id): Promise<Sessao>;
   encerrarSessao(id: Id): Promise<void>;
+  /** Empurra o início da sessão em andamento (ao retomar um cardio pausado, a pausa não conta). */
+  atualizarInicioSessao(id: Id, inicio: number): Promise<void>;
   obterSessao(id: Id): Promise<Sessao | null>;
   /** Sessão em andamento (sem fim), se houver. */
   obterSessaoAtiva(): Promise<Sessao | null>;
@@ -159,6 +189,11 @@ export interface Repositorio {
   atualizarSerie(id: Id, dados: Partial<Pick<Serie, 'carga' | 'repeticoes'>>): Promise<void>;
   removerSerie(id: Id): Promise<void>;
   listarSeriesDaSessao(sessaoId: Id): Promise<Serie[]>;
+
+  registrarCardio(dados: Omit<CardioFeito, 'id' | 'concluidoEm'>): Promise<CardioFeito>;
+  atualizarCardio(id: Id, minutos: number): Promise<void>;
+  removerCardio(id: Id): Promise<void>;
+  listarCardiosDaSessao(sessaoId: Id): Promise<CardioFeito[]>;
   /**
    * Séries do exercício na sessão encerrada mais recente em que ele foi feito.
    * Usado para preencher a carga do último treino e comparar a evolução no resumo

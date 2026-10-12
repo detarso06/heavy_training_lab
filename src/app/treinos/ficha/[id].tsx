@@ -1,11 +1,15 @@
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { router, Stack, useFocusEffect, useLocalSearchParams, useTheme } from 'expo-router';
 import { useCallback, useState } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { useConfirmacao } from '@/components/dialogo-confirmacao';
+import { ModalCardio } from '@/components/modal-cardio';
 import { ModalVideo } from '@/components/modal-video';
 import { Botao, BotaoIcone, Campo, Cartao, Contador } from '@/components/ui';
 import { repo, type Ficha, type FichaExercicioDetalhe, type PlanoSeries, type TipoSerie } from '@/db';
+import { adicionarCardioNaFicha } from '@/lib/cardio';
+import { formatarMinutos } from '@/lib/metas';
 import { CORES } from '@/lib/tema';
 
 /** `padrao` preenche as repetições quando o tipo sai de 0 séries com o campo vazio. */
@@ -31,6 +35,8 @@ export default function TelaFicha() {
   const [carregado, setCarregado] = useState(false);
   const [videoDe, setVideoDe] = useState<FichaExercicioDetalhe | null>(null);
   const [salvo, setSalvo] = useState(false);
+  /** Janela "Adicionar cardio": `n` remonta a janela a cada abertura (começa limpa). */
+  const [cardioNovo, setCardioNovo] = useState<{ n: number; atividade: string } | null>(null);
   const { confirmar, dialogo } = useConfirmacao();
 
   useFocusEffect(
@@ -94,9 +100,26 @@ export default function TelaFicha() {
     await repo.reordenarFicha(ficha.id, nova.map((i) => i.id));
   };
 
+  const abrirCardio = async () => {
+    const perfil = await repo.obterPerfil();
+    setCardioNovo({ n: Date.now(), atividade: perfil.cardioAtividade?.trim() || 'Esteira' });
+  };
+
+  const adicionarCardio = async (atividade: string, minutos: number) => {
+    setCardioNovo(null);
+    await adicionarCardioNaFicha(ficha.id, atividade, minutos);
+    setItens(await repo.listarExerciciosDaFicha(ficha.id));
+  };
+
+  const alterarCardio = (item: FichaExercicioDetalhe, cardioMin: number) => {
+    alterarLocal(item.id, (i) => ({ ...i, cardioMin }));
+    repo.atualizarExercicioDaFicha(item.id, { cardioMin });
+  };
+
   const remover = async (item: FichaExercicioDetalhe) => {
+    const cardio = item.cardioMin !== null;
     const ok = await confirmar({
-      titulo: 'Remover exercício?',
+      titulo: cardio ? 'Remover cardio?' : 'Remover exercício?',
       destaque: item.exercicio.nome,
       mensagem: 'Ele sai deste treino. O histórico de treinos já feitos continua salvo.',
       textoConfirmar: 'Remover',
@@ -110,8 +133,8 @@ export default function TelaFicha() {
   const salvarTreino = async () => {
     await salvarNome();
     await Promise.all(
-      itens.map(({ id: itemId, aquecimento, preparatoria, validas, descansoSeg }) =>
-        repo.atualizarExercicioDaFicha(itemId, { aquecimento, preparatoria, validas, descansoSeg })
+      itens.map(({ id: itemId, aquecimento, preparatoria, validas, descansoSeg, cardioMin }) =>
+        repo.atualizarExercicioDaFicha(itemId, { aquecimento, preparatoria, validas, descansoSeg, cardioMin })
       )
     );
     setSalvo(true);
@@ -148,6 +171,7 @@ export default function TelaFicha() {
         <Cartao key={item.id} style={styles.cartao}>
           <View style={styles.cabecalho}>
             <Text style={[styles.posicao, { color: CORES.dourado }]}>{i + 1}</Text>
+            {item.cardioMin !== null && <Ionicons name="pulse-outline" size={22} color={CORES.dourado} />}
             <View style={styles.flex}>
               <Text style={[styles.nome, { color: colors.text }]}>{item.exercicio.nome}</Text>
               {item.exercicio.grupoMuscular && (
@@ -163,72 +187,91 @@ export default function TelaFicha() {
             />
             <BotaoIcone
               icone="trash-outline"
-              rotulo="Remover exercício"
+              rotulo={item.cardioMin !== null ? 'Remover cardio' : 'Remover exercício'}
               cor={colors.notification}
               onPress={() => remover(item)}
             />
           </View>
 
-          <View style={styles.tabelaCabecalho}>
-            <Text style={[styles.colTipo, styles.legenda, { color: colors.text }]}>Séries</Text>
-            <Text style={[styles.colQtd, styles.legenda, { color: colors.text }]}>Qtd.</Text>
-            <Text style={[styles.colReps, styles.legenda, { color: colors.text }]}>Reps</Text>
-          </View>
-          {TIPOS.map(({ tipo, nome: nomeTipo, padrao }) => {
-            const plano = item[tipo];
-            return (
-              <View key={tipo} style={styles.linhaSerie}>
-                <Text style={[styles.colTipo, { color: colors.text }]}>{nomeTipo}</Text>
+          {item.cardioMin !== null ? (
+            <View style={styles.linhaSerie}>
+              <Text style={[styles.colTipo, { color: colors.text }]}>Tempo</Text>
+              <View style={styles.colQtd}>
+                <Contador
+                  rotulo={`minutos de ${item.exercicio.nome}`}
+                  valor={item.cardioMin}
+                  min={5}
+                  max={180}
+                  passo={5}
+                  formatar={formatarMinutos}
+                  onChange={(v) => alterarCardio(item, v)}
+                />
+              </View>
+            </View>
+          ) : (
+            <>
+              <View style={styles.tabelaCabecalho}>
+                <Text style={[styles.colTipo, styles.legenda, { color: colors.text }]}>Séries</Text>
+                <Text style={[styles.colQtd, styles.legenda, { color: colors.text }]}>Qtd.</Text>
+                <Text style={[styles.colReps, styles.legenda, { color: colors.text }]}>Reps</Text>
+              </View>
+              {TIPOS.map(({ tipo, nome: nomeTipo, padrao }) => {
+                const plano = item[tipo];
+                return (
+                  <View key={tipo} style={styles.linhaSerie}>
+                    <Text style={[styles.colTipo, { color: colors.text }]}>{nomeTipo}</Text>
+                    <View style={styles.colQtd}>
+                      <Contador
+                        rotulo={`séries de ${nomeTipo.toLowerCase()}`}
+                        valor={plano.series}
+                        max={20}
+                        onChange={(series) =>
+                          alterarPlano(
+                            item,
+                            tipo,
+                            { series, repeticoes: series > 0 && !plano.repeticoes.trim() ? padrao : plano.repeticoes },
+                            true
+                          )
+                        }
+                      />
+                    </View>
+                    <View style={styles.colReps}>
+                      <Campo
+                        style={[styles.campoReps, plano.series === 0 && styles.inativo]}
+                        value={plano.repeticoes}
+                        placeholder={plano.series > 0 ? padrao : '–'}
+                        editable={plano.series > 0}
+                        onChangeText={(repeticoes) => alterarPlano(item, tipo, { ...plano, repeticoes }, false)}
+                        onBlur={() => alterarPlano(item, tipo, plano, true)}
+                      />
+                    </View>
+                  </View>
+                );
+              })}
+
+              <View style={styles.linhaSerie}>
+                <Text style={[styles.colTipo, { color: colors.text }]}>Descanso</Text>
                 <View style={styles.colQtd}>
                   <Contador
-                    rotulo={`séries de ${nomeTipo.toLowerCase()}`}
-                    valor={plano.series}
-                    max={20}
-                    onChange={(series) =>
-                      alterarPlano(
-                        item,
-                        tipo,
-                        { series, repeticoes: series > 0 && !plano.repeticoes.trim() ? padrao : plano.repeticoes },
-                        true
-                      )
-                    }
-                  />
-                </View>
-                <View style={styles.colReps}>
-                  <Campo
-                    style={[styles.campoReps, plano.series === 0 && styles.inativo]}
-                    value={plano.repeticoes}
-                    placeholder={plano.series > 0 ? padrao : '–'}
-                    editable={plano.series > 0}
-                    onChangeText={(repeticoes) => alterarPlano(item, tipo, { ...plano, repeticoes }, false)}
-                    onBlur={() => alterarPlano(item, tipo, plano, true)}
+                    rotulo="descanso"
+                    valor={item.descansoSeg}
+                    passo={15}
+                    max={600}
+                    formatar={formatarDescanso}
+                    onChange={(v) => alterarDescanso(item, v)}
                   />
                 </View>
               </View>
-            );
-          })}
 
-          <View style={styles.linhaSerie}>
-            <Text style={[styles.colTipo, { color: colors.text }]}>Descanso</Text>
-            <View style={styles.colQtd}>
-              <Contador
-                rotulo="descanso"
-                valor={item.descansoSeg}
-                passo={15}
-                max={600}
-                formatar={formatarDescanso}
-                onChange={(v) => alterarDescanso(item, v)}
+              <Botao
+                titulo={item.exercicio.videoUrl ? 'Ver execução' : 'Adicionar vídeo de execução'}
+                icone={item.exercicio.videoUrl ? 'play-circle' : 'videocam-outline'}
+                variante="secundario"
+                onPress={() => setVideoDe(item)}
+                style={styles.botaoVideo}
               />
-            </View>
-          </View>
-
-          <Botao
-            titulo={item.exercicio.videoUrl ? 'Ver execução' : 'Adicionar vídeo de execução'}
-            icone={item.exercicio.videoUrl ? 'play-circle' : 'videocam-outline'}
-            variante="secundario"
-            onPress={() => setVideoDe(item)}
-            style={styles.botaoVideo}
-          />
+            </>
+          )}
         </Cartao>
       ))}
 
@@ -249,6 +292,16 @@ export default function TelaFicha() {
           router.push({ pathname: '/treinos/adicionar-exercicio', params: { fichaId: String(ficha.id) } })
         }
       />
+      <Botao titulo="Adicionar cardio" icone="pulse-outline" variante="secundario" onPress={abrirCardio} />
+      {cardioNovo && (
+        <ModalCardio
+          key={cardioNovo.n}
+          visivel
+          atividadeInicial={cardioNovo.atividade}
+          onAdicionar={adicionarCardio}
+          onFechar={() => setCardioNovo(null)}
+        />
+      )}
 
       <Botao
         titulo={salvo ? 'Treino salvo!' : 'Salvar treino'}

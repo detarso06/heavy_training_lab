@@ -6,6 +6,7 @@ import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from
 import { useConfirmacao } from '@/components/dialogo-confirmacao';
 import { Botao, BotaoIcone, Campo, Cartao, CriarComNome, Selo } from '@/components/ui';
 import { repo, type Ficha, type Rotina } from '@/db';
+import { formatarMinutos } from '@/lib/metas';
 import { CORES } from '@/lib/tema';
 
 type FichaComTotal = Ficha & { totalExercicios: number };
@@ -29,7 +30,7 @@ export default function TelaRotina() {
         const comTotal = await Promise.all(
           lista.map(async (f) => ({
             ...f,
-            totalExercicios: f.descanso ? 0 : (await repo.listarExerciciosDaFicha(f.id)).length,
+            totalExercicios: f.descanso || f.cardio ? 0 : (await repo.listarExerciciosDaFicha(f.id)).length,
           }))
         );
         if (!ativo) return;
@@ -82,6 +83,9 @@ export default function TelaRotina() {
     const ficha = await repo.criarFicha({ rotinaId: rotina.id, nome: 'Descanso', descricao: null, descanso: true });
     setFichas([...fichas, { ...ficha, totalExercicios: 0 }]);
   };
+
+  const adicionarCardio = () =>
+    router.push({ pathname: '/treinos/cardio/[id]', params: { id: 'novo', rotina: String(rotina.id) } });
 
   const removerDescanso = async (f: FichaComTotal, posicao: number) => {
     const ok = await confirmar({
@@ -148,7 +152,7 @@ export default function TelaRotina() {
       </View>
       {reordenando && (
         <Text style={[styles.detalhe, { color: colors.text }]}>
-          Esta é a ordem do rodízio da semana. Use as setas para subir ou descer cada treino ou descanso.
+          Esta é a ordem do rodízio da semana. Use as setas para subir ou descer cada treino, cardio ou descanso.
         </Text>
       )}
 
@@ -157,12 +161,15 @@ export default function TelaRotina() {
           <View style={styles.linhaTreino}>
             <Text style={[styles.posicao, { color: CORES.dourado }]}>{i + 1}</Text>
             {f.descanso && <Ionicons name="bed-outline" size={22} color={CORES.dourado} />}
+            {f.cardio && <Ionicons name="pulse-outline" size={22} color={CORES.dourado} />}
             <View style={styles.flex}>
               <Text style={[styles.nome, { color: colors.text }]}>{f.nome}</Text>
               <Text style={[styles.detalhe, { color: colors.text }]}>
                 {f.descanso
                   ? 'Dia de folga no rodízio'
-                  : f.totalExercicios === 1
+                  : f.cardio
+                    ? `${f.cardio.atividade} · ${formatarMinutos(f.cardio.minutos)}`
+                    : f.totalExercicios === 1
                     ? '1 exercício'
                     : `${f.totalExercicios} exercícios`}
               </Text>
@@ -206,7 +213,11 @@ export default function TelaRotina() {
           <Pressable
             key={f.id}
             accessibilityRole="button"
-            onPress={() => router.push({ pathname: '/treinos/ficha/[id]', params: { id: String(f.id) } })}>
+            onPress={() =>
+              f.cardio
+                ? router.push({ pathname: '/treinos/cardio/[id]', params: { id: String(f.id) } })
+                : router.push({ pathname: '/treinos/ficha/[id]', params: { id: String(f.id) } })
+            }>
             {({ pressed }) => (
               <Cartao style={[styles.item, { opacity: pressed ? 0.7 : 1 }]}>
                 <View style={styles.flex}>{conteudo}</View>
@@ -222,6 +233,7 @@ export default function TelaRotina() {
         {!reordenando && (
           <>
             <CriarComNome titulo="Criar novo treino" placeholder='Nome do treino (ex.: "Treino A - Peito")' onCriar={criarTreino} />
+            <Botao titulo="Adicionar dia de cardio" variante="secundario" icone="pulse-outline" onPress={adicionarCardio} />
             <Botao titulo="Adicionar dia de descanso" variante="secundario" icone="bed-outline" onPress={adicionarDescanso} />
           </>
         )}

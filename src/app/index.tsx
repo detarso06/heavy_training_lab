@@ -98,13 +98,17 @@ export default function Inicio() {
   const fichaDoDia =
     descansando || treinou ? proximoTreino : (fichaEscolhida ?? treino.ficha ?? proximoTreino ?? fichas[0]);
   const ehDescanso = !sessaoAtiva && !treinou && !!fichaDoDia?.descanso;
+  const cardioDoDia = !sessaoAtiva && !treinou ? (fichaDoDia?.cardio ?? null) : null;
+  /** O que foi feito hoje era o dia de cardio. */
+  const fezCardio = treinou && !!fichas.find((f) => f.id === treinoHoje?.fichaId)?.cardio;
 
   let destaque = fichaDoDia?.nome;
   if (sessaoAtiva) destaque = sessaoAtiva.nome;
   else if (semFichas) destaque = 'Nenhum treino cadastrado';
   else if (descansando) destaque = 'Descanso feito';
-  else if (treinou) destaque = 'Treino do dia feito!';
+  else if (treinou) destaque = fezCardio ? 'Cardio feito!' : 'Treino do dia feito!';
   else if (ehDescanso) destaque = 'Dia de descanso';
+  else if (cardioDoDia) destaque = 'Dia de cardio';
   else if (treino.semanaCompleta && !fichaEscolhida) destaque = 'Semana concluída!';
 
   // Heavy Guy do painel: se preparando enquanto o treino de hoje não foi feito; dormindo depois do treino ou no descanso.
@@ -178,7 +182,23 @@ export default function Inicio() {
     await iniciarTreino(fichaDoDia);
   };
 
+  const iniciarCardio = async (ficha: Ficha) => {
+    if (!ficha.cardio) return;
+    const ok = await confirmar({
+      titulo: 'Iniciar cardio?',
+      destaque: `${ficha.cardio.atividade} · ${formatarMinutos(ficha.cardio.minutos)}`,
+      mensagem: 'O cronômetro começa a contar assim que você confirmar. Ao finalizar, o tempo soma na meta da semana.',
+      textoConfirmar: 'Bora!',
+      icone: 'pulse-outline',
+    });
+    if (!ok) return;
+    const sessao = await repo.iniciarSessao(ficha.id);
+    setEscolhida(null);
+    abrirSessao(sessao.id);
+  };
+
   const iniciarTreino = async (ficha: Ficha) => {
+    if (ficha.cardio) return iniciarCardio(ficha);
     const exercicios = await repo.listarExerciciosDaFicha(ficha.id);
     if (exercicios.length === 0) {
       const ok = await confirmar({
@@ -210,6 +230,7 @@ export default function Inicio() {
   else if (descansando) textoBotao = 'Treinar mesmo assim';
   else if (treinou) textoBotao = 'Fazer outro treino';
   else if (ehDescanso) textoBotao = 'Descansei hoje';
+  else if (cardioDoDia) textoBotao = 'Iniciar cardio';
 
   return (
     <ScrollView contentContainerStyle={styles.conteudo}>
@@ -240,6 +261,11 @@ export default function Inicio() {
           </Text>
         )}
         {ehDescanso && <Text style={styles.rotina}>Recupere as energias. O descanso conta na sequência.</Text>}
+        {cardioDoDia && (
+          <Text style={styles.rotina}>
+            <Text style={styles.nomeRotina}>{cardioDoDia.atividade}</Text> · {formatarMinutos(cardioDoDia.minutos)}
+          </Text>
+        )}
         {(descansando || treinou) && fichaDoDia && (
           <Text style={styles.rotina}>
             Próximo treino: <Text style={styles.nomeRotina}>{fichaDoDia.nome}</Text>

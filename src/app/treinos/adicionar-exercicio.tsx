@@ -7,6 +7,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Botao, Campo } from '@/components/ui';
 import { repo, type Exercicio } from '@/db';
 import { avisar, mensagemDeErro } from '@/lib/avisos';
+import { GRUPO_CARDIO } from '@/lib/cardio';
 import { CATALOGO, GRUPOS, NOMES_DO_CATALOGO, combina, normalizar, obterOuCriarExercicio } from '@/lib/catalogo';
 import { CORES } from '@/lib/tema';
 
@@ -51,7 +52,7 @@ export default function AdicionarExercicio() {
   const opcoes = useMemo<Opcao[]>(() => {
     const doGrupo = (g: string | null) => grupo === TODOS || g === grupo;
     const proprios: Opcao[] = meus
-      .filter((e) => !NOMES_DO_CATALOGO.has(normalizar(e.nome)))
+      .filter((e) => !NOMES_DO_CATALOGO.has(normalizar(e.nome)) && e.grupoMuscular !== GRUPO_CARDIO)
       .map((e) => ({ chave: `m:${e.id}`, nome: e.nome, grupo: e.grupoMuscular, exercicio: e }));
     return [...proprios, ...DO_CATALOGO].filter((o) => doGrupo(o.grupo) && combina(termo, o.nome));
   }, [meus, termo, grupo]);
