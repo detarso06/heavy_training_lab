@@ -4,6 +4,7 @@ import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-nat
 
 import { useConfirmacao } from '@/components/dialogo-confirmacao';
 import { ModalVideo } from '@/components/modal-video';
+import { MusculosDoTreino } from '@/components/musculos-do-treino';
 import { Botao, BotaoIcone, Campo, Cartao, Contador } from '@/components/ui';
 import { repo, type Ficha, type FichaExercicioDetalhe, type PlanoSeries, type TipoSerie } from '@/db';
 import { CORES } from '@/lib/tema';
@@ -249,6 +250,8 @@ export default function TelaFicha() {
           router.push({ pathname: '/treinos/adicionar-exercicio', params: { fichaId: String(ficha.id) } })
         }
       />
+
+      <MusculosDoTreino itens={itens} />
 
       <Botao
         titulo={salvo ? 'Treino salvo!' : 'Salvar treino'}
