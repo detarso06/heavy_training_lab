@@ -3,6 +3,7 @@ import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
+import { RelatorioMusculos } from '@/components/relatorio-musculos';
 import { Cartao, Selo } from '@/components/ui';
 import { repo, type Ficha, type Rotina, type Sessao } from '@/db';
 import { formatarData } from '@/lib/evolucao';
@@ -18,6 +19,7 @@ export default function Evolucao() {
   const [dados, setDados] = useState<Dados | null>(null);
   /** Nulo = ainda não escolheu: usa a rotina ativa. */
   const [escolhida, setEscolhida] = useState<number | null>(null);
+  const [aba, setAba] = useState<Aba>('relatorio');
 
   useFocusEffect(
     useCallback(() => {
@@ -38,15 +40,49 @@ export default function Evolucao() {
     }, [])
   );
 
+  return (
+    <ScrollView contentContainerStyle={styles.conteudo}>
+      <View style={styles.abas}>
+        {ABAS.map(({ id, titulo }) => {
+          const ativa = id === aba;
+          return (
+            <Pressable
+              key={id}
+              accessibilityRole="tab"
+              accessibilityState={{ selected: ativa }}
+              onPress={() => setAba(id)}
+              style={[styles.aba, ativa && styles.abaAtiva]}>
+              <Text style={[styles.textoAba, ativa && styles.textoAbaAtiva]}>{titulo}</Text>
+            </Pressable>
+          );
+        })}
+      </View>
+      {aba === 'relatorio' ? <RelatorioMusculos /> : <PorTreino dados={dados} escolhida={escolhida} onEscolher={setEscolhida} />}
+    </ScrollView>
+  );
+}
+
+type Aba = 'relatorio' | 'treinos';
+
+const ABAS: { id: Aba; titulo: string }[] = [
+  { id: 'relatorio', titulo: 'Relatório' },
+  { id: 'treinos', titulo: 'Por treino' },
+];
+
+function PorTreino({
+  dados,
+  escolhida,
+  onEscolher,
+}: {
+  dados: Dados | null;
+  escolhida: number | null;
+  onEscolher: (id: number) => void;
+}) {
   if (!dados) return <ActivityIndicator style={styles.carregando} />;
 
   const { rotinas, fichasPorRotina, concluidas } = dados;
   if (rotinas.length === 0) {
-    return (
-      <View style={styles.vazio}>
-        <Text style={styles.textoVazio}>Crie uma rotina e conclua treinos para acompanhar sua evolução aqui.</Text>
-      </View>
-    );
+    return <Text style={styles.textoVazio}>Crie uma rotina e conclua treinos para acompanhar sua evolução aqui.</Text>;
   }
 
   const rotinaId = escolhida ?? rotinas.find((r) => r.ativa)?.id ?? rotinas[0].id;
@@ -55,7 +91,7 @@ export default function Evolucao() {
   const fichas = (fichasPorRotina.get(rotinaId) ?? []).filter((f) => !f.descanso && !f.cardio);
 
   return (
-    <ScrollView contentContainerStyle={styles.conteudo}>
+    <>
       <Text style={styles.rotulo}>Rotina</Text>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filtros}>
         {rotinas.map((r) => {
@@ -65,7 +101,7 @@ export default function Evolucao() {
               key={r.id}
               accessibilityRole="radio"
               accessibilityState={{ selected: ativo }}
-              onPress={() => setEscolhida(r.id)}
+              onPress={() => onEscolher(r.id)}
               style={[styles.chip, ativo && styles.chipAtivo]}>
               <Text style={[styles.textoChip, ativo && styles.textoChipAtivo]}>{r.nome}</Text>
             </Pressable>
@@ -104,15 +140,19 @@ export default function Evolucao() {
           </Pressable>
         );
       })}
-    </ScrollView>
+    </>
   );
 }
 
 const styles = StyleSheet.create({
   carregando: { marginTop: 40 },
-  vazio: { flex: 1, padding: 24, justifyContent: 'center' },
-  textoVazio: { color: CORES.textoSuave, fontSize: 16, textAlign: 'center' },
+  textoVazio: { color: CORES.textoSuave, fontSize: 16, textAlign: 'center', marginTop: 24 },
   conteudo: { padding: 16, gap: 12, paddingBottom: 40 },
+  abas: { flexDirection: 'row', backgroundColor: CORES.cartao, borderRadius: 12, padding: 4 },
+  aba: { flex: 1, alignItems: 'center', paddingVertical: 10, borderRadius: 9 },
+  abaAtiva: { backgroundColor: CORES.borda },
+  textoAba: { color: CORES.textoSuave, fontSize: 15, fontWeight: '700' },
+  textoAbaAtiva: { color: CORES.texto },
   rotulo: { color: CORES.textoSuave, fontSize: 13, fontWeight: '700', letterSpacing: 1.5, textTransform: 'uppercase' },
   filtros: { gap: 8 },
   chip: { borderWidth: 1.5, borderColor: CORES.borda, borderRadius: 999, paddingVertical: 8, paddingHorizontal: 14 },

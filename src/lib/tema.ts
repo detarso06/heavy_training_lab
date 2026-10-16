@@ -10,6 +10,8 @@ export const CORES = {
   textoSuave: '#A89C8C',
   vermelho: '#E3262B',
   dourado: '#F2B33D',
+  /** Só para confirmações de que está tudo certo (ex.: partes equilibradas). */
+  verde: '#4CB86A',
   /** Texto sobre botões/selos vermelhos ou dourados. */
   sobreDestaque: '#0B0A09',
 } as const;

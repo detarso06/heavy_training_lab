@@ -6,6 +6,7 @@ import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-nat
 import { useConfirmacao } from '@/components/dialogo-confirmacao';
 import { ModalCardio } from '@/components/modal-cardio';
 import { ModalVideo } from '@/components/modal-video';
+import { MusculosDoTreino } from '@/components/musculos-do-treino';
 import { Botao, BotaoIcone, Campo, Cartao, Contador } from '@/components/ui';
 import { repo, type Ficha, type FichaExercicioDetalhe, type PlanoSeries, type TipoSerie } from '@/db';
 import { adicionarCardioNaFicha } from '@/lib/cardio';
@@ -302,6 +303,8 @@ export default function TelaFicha() {
           onFechar={() => setCardioNovo(null)}
         />
       )}
+
+      <MusculosDoTreino itens={itens} />
 
       <Botao
         titulo={salvo ? 'Treino salvo!' : 'Salvar treino'}
