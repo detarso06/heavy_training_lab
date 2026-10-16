@@ -1,6 +1,7 @@
 // Implementação web (localhost): mantém os dados em memória e salva no localStorage.
 // Mesma interface do SQLite em index.ts, para as telas não precisarem saber a diferença.
 import type {
+  CardioFeito,
   Exercicio,
   Ficha,
   FichaExercicio,
@@ -26,6 +27,8 @@ interface Banco {
   fichaExercicios: FichaExercicio[];
   sessoes: Sessao[];
   series: Serie[];
+  /** Cardio feito dentro das sessões de treino. */
+  cardios: CardioFeito[];
   perfil: Perfil;
   /** Chave "tipo:periodo", ex.: "agua:2026-10-05". */
   progresso: Record<string, number>;
@@ -40,6 +43,7 @@ function vazio(): Banco {
     fichaExercicios: [],
     sessoes: [],
     series: [],
+    cardios: [],
     perfil: perfilVazio(),
     progresso: {},
   };
@@ -63,6 +67,7 @@ function migrar(b: Banco) {
   for (const f of b.fichas) {
     f.ordem ??= f.id;
     f.descanso ??= false;
+    f.cardio ??= null;
   }
 
   const semRotina = b.fichas.filter((f) => f.rotinaId == null);
@@ -87,6 +92,8 @@ function migrar(b: Banco) {
     delete antigo.series;
     delete antigo.repeticoes;
   }
+
+  for (const fe of b.fichaExercicios) fe.cardioMin ??= null;
 
   for (const e of b.exercicios) delete (e as Exercicio & { wgerId?: unknown }).wgerId;
   for (const s of b.series) s.tipo ??= 'validas';
@@ -161,7 +168,7 @@ export const repo: Repositorio = {
   atualizarExercicio: (id, dados) => escrever((b) => atualizarItem(b.exercicios, id, dados)),
   removerExercicio: (id) =>
     escrever((b) => {
-      if (b.series.some((s) => s.exercicioId === id)) {
+      if (b.series.some((s) => s.exercicioId === id) || b.cardios.some((c) => c.exercicioId === id)) {
         throw new Error('Este exercício já tem treinos registrados e não pode ser apagado.');
       }
       b.exercicios = b.exercicios.filter((e) => e.id !== id);
@@ -207,6 +214,7 @@ export const repo: Repositorio = {
         criadaEm: Date.now(),
         ...dados,
         descanso: dados.descanso ?? false,
+        cardio: dados.cardio ?? null,
       };
       b.fichas.push(ficha);
       return { ...ficha };
@@ -234,7 +242,12 @@ export const repo: Repositorio = {
   adicionarExercicioNaFicha: (dados) =>
     escrever((b) => {
       const ordens = b.fichaExercicios.filter((fe) => fe.fichaId === dados.fichaId).map((fe) => fe.ordem);
-      const fe = { id: novoId(b), ordem: Math.max(-1, ...ordens) + 1, ...structuredClone(dados) };
+      const fe = {
+        id: novoId(b),
+        ordem: Math.max(-1, ...ordens) + 1,
+        ...structuredClone(dados),
+        cardioMin: dados.cardioMin ?? null,
+      };
       b.fichaExercicios.push(fe);
       return structuredClone(fe);
     }),
@@ -265,6 +278,11 @@ export const repo: Repositorio = {
       const s = b.sessoes.find((x) => x.id === id);
       if (s && s.fim === null) s.fim = Date.now();
     }),
+  atualizarInicioSessao: (id, inicio) =>
+    escrever((b) => {
+      const s = b.sessoes.find((x) => x.id === id);
+      if (s && s.fim === null) s.inicio = inicio;
+    }),
   obterSessao: (id) => ler((b) => b.sessoes.find((s) => s.id === id) ?? null),
   obterSessaoAtiva: () =>
     ler((b) => b.sessoes.filter((s) => s.fim === null).sort((x, y) => y.inicio - x.inicio)[0] ?? null),
@@ -274,6 +292,7 @@ export const repo: Repositorio = {
     escrever((b) => {
       b.sessoes = b.sessoes.filter((s) => s.id !== id);
       b.series = b.series.filter((s) => s.sessaoId !== id);
+      b.cardios = b.cardios.filter((c) => c.sessaoId !== id);
     }),
 
   registrarSerie: (dados) =>
@@ -289,6 +308,19 @@ export const repo: Repositorio = {
     }),
   listarSeriesDaSessao: (sessaoId) =>
     ler((b) => b.series.filter((s) => s.sessaoId === sessaoId).sort((x, y) => x.concluidaEm - y.concluidaEm)),
+  registrarCardio: (dados) =>
+    escrever((b) => {
+      const cardio = { id: novoId(b), concluidoEm: Date.now(), ...dados };
+      b.cardios.push(cardio);
+      return { ...cardio };
+    }),
+  atualizarCardio: (id, minutos) => escrever((b) => atualizarItem(b.cardios, id, { minutos })),
+  removerCardio: (id) =>
+    escrever((b) => {
+      b.cardios = b.cardios.filter((c) => c.id !== id);
+    }),
+  listarCardiosDaSessao: (sessaoId) =>
+    ler((b) => b.cardios.filter((c) => c.sessaoId === sessaoId).sort((x, y) => x.concluidoEm - y.concluidoEm)),
   ultimasSeriesDoExercicio: (exercicioId, ignorarSessaoId) =>
     ler((b) => {
       const encerradas = new Set(
@@ -316,6 +348,7 @@ export const repo: Repositorio = {
         fichaExercicios: [],
         sessoes: [],
         series: [],
+        cardios: [],
         progresso: {},
       });
     }),

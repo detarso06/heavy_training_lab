@@ -3,6 +3,7 @@ import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-nati
 
 import { BotaoIcone, Selo } from '@/components/ui';
 import type { Ficha, Id } from '@/db';
+import { formatarMinutos } from '@/lib/metas';
 import { CORES } from '@/lib/tema';
 
 interface Props {
@@ -51,6 +52,11 @@ export function SeletorTreino({ visivel, fichas, atual, sugerida, feitasNaSemana
                   />
                   <View style={styles.flex}>
                     <Text style={styles.nome}>{f.nome}</Text>
+                    {f.cardio && (
+                      <Text style={styles.detalhe}>
+                        {f.cardio.atividade} · {formatarMinutos(f.cardio.minutos)}
+                      </Text>
+                    )}
                     {feito && <Text style={styles.detalhe}>✓ Feito esta semana</Text>}
                   </View>
                   {f.id === sugerida && <Selo texto="Sugerido" />}

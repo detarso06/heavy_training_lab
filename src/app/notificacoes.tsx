@@ -123,7 +123,7 @@ function Lista() {
       {dados.comentarios.map((c) => {
         const novo = c.criadoEm > dados.vistasEm;
         return (
-          <Pressable key={c.id} accessibilityRole="button" onPress={() => abrirCheckin(c.checkin)}>
+          <Pressable key={c.id} accessibilityRole="button" onPress={() => abrirCheckin(c.checkin, '/notificacoes')}>
             {({ pressed }) => (
               <Cartao style={[styles.item, novo && styles.novo, { opacity: pressed ? 0.7 : 1 }]}>
                 <AvatarClub avatar={c.autor.avatar} />
@@ -149,7 +149,7 @@ function Lista() {
           <Pressable
             key={c.id}
             accessibilityRole="button"
-            onPress={() => abrirCheckin(c.id)}>
+            onPress={() => abrirCheckin(c.id, '/notificacoes')}>
             {({ pressed }) => (
               <Cartao style={[styles.item, novo && styles.novo, { opacity: pressed ? 0.7 : 1 }]}>
                 <AvatarClub avatar={c.autor.avatar} />

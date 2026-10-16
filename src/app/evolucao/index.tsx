@@ -88,7 +88,7 @@ function PorTreino({
   const rotinaId = escolhida ?? rotinas.find((r) => r.ativa)?.id ?? rotinas[0].id;
   const rotina = rotinas.find((r) => r.id === rotinaId)!;
   // Descansos não têm exercícios, então não entram na Evolução.
-  const fichas = (fichasPorRotina.get(rotinaId) ?? []).filter((f) => !f.descanso);
+  const fichas = (fichasPorRotina.get(rotinaId) ?? []).filter((f) => !f.descanso && !f.cardio);
 
   return (
     <>

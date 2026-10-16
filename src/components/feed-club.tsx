@@ -3,7 +3,7 @@ import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 
-import { CartaoCheckin } from '@/components/cartao-checkin';
+import { CartaoCheckin, CheckinsPorDia } from '@/components/cartao-checkin';
 import { Botao } from '@/components/ui';
 import { mensagemDeErro } from '@/lib/avisos';
 import {
@@ -92,14 +92,19 @@ export function FeedClub() {
           <Botao titulo="Abrir o Club" icone="people-outline" variante="secundario" onPress={() => router.navigate('/club')} style={styles.botao} />
         </>
       )}
-      {feed?.checkins.map((c) => (
-        <CartaoCheckin
-          key={c.id}
-          checkin={c}
-          urlFoto={c.foto ? feed.fotos.get(c.foto) : undefined}
-          comentarios={feed.comentarios.get(c.id) ?? 0}
+      {feed && (
+        <CheckinsPorDia
+          checkins={feed.checkins}
+          renderizar={(c) => (
+            <CartaoCheckin
+              key={c.id}
+              checkin={c}
+              urlFoto={c.foto ? feed.fotos.get(c.foto) : undefined}
+              comentarios={feed.comentarios.get(c.id) ?? 0}
+            />
+          )}
         />
-      ))}
+      )}
     </View>
   );
 }

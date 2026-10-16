@@ -24,7 +24,7 @@ function descrever(s: TreinosSalvos) {
     hour: '2-digit',
     minute: '2-digit',
   });
-  const treinos = s.rotinas.reduce((n, r) => n + r.treinos.filter((t) => !t.descanso).length, 0);
+  const treinos = s.rotinas.reduce((n, r) => n + r.treinos.filter((t) => !t.descanso && !t.cardio).length, 0);
   const rotinas = s.rotinas.length === 1 ? '1 rotina' : `${s.rotinas.length} rotinas`;
   return `${rotinas}, ${treinos === 1 ? '1 treino' : `${treinos} treinos`} · salva em ${quando}${s.aparelho ? ` (${s.aparelho})` : ''}`;
 }

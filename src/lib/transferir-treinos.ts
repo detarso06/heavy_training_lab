@@ -3,7 +3,7 @@
 // progresso das metas ficam no aparelho de origem (decisão do usuário).
 import { Platform } from 'react-native';
 
-import { repo, type Perfil, type PlanoSeries } from '@/db';
+import { repo, type CardioPlanejado, type Perfil, type PlanoSeries } from '@/db';
 import { escolherAvatar } from '@/lib/avatar-atual';
 import { normalizar, obterOuCriarExercicio } from '@/lib/catalogo';
 
@@ -15,12 +15,16 @@ export interface ExercicioCopiado {
   preparatoria: PlanoSeries;
   validas: PlanoSeries;
   descansoSeg: number;
+  /** Cardio dentro do treino (ausente nas cópias antigas). */
+  cardioMin?: number | null;
 }
 
 export interface TreinoCopiado {
   nome: string;
   descricao: string | null;
   descanso: boolean;
+  /** Ausente nas cópias salvas antes do dia de cardio existir. */
+  cardio?: CardioPlanejado | null;
   exercicios: ExercicioCopiado[];
 }
 
@@ -46,6 +50,7 @@ export async function copiarTreinosDoAparelho(): Promise<RotinaCopiada[]> {
           nome: f.nome,
           descricao: f.descricao,
           descanso: f.descanso,
+          cardio: f.cardio,
           exercicios: (await repo.listarExerciciosDaFicha(f.id)).map((fe) => ({
             nome: fe.exercicio.nome,
             grupoMuscular: fe.exercicio.grupoMuscular,
@@ -54,6 +59,7 @@ export async function copiarTreinosDoAparelho(): Promise<RotinaCopiada[]> {
             preparatoria: fe.preparatoria,
             validas: fe.validas,
             descansoSeg: fe.descansoSeg,
+            cardioMin: fe.cardioMin,
           })),
         }))
       ),
@@ -78,7 +84,13 @@ export async function adicionarTreinosNoAparelho(copia: RotinaCopiada[]) {
     }
     const rotina = await repo.criarRotina({ nome: r.nome, descricao: r.descricao });
     for (const t of r.treinos) {
-      const ficha = await repo.criarFicha({ rotinaId: rotina.id, nome: t.nome, descricao: t.descricao, descanso: t.descanso });
+      const ficha = await repo.criarFicha({
+        rotinaId: rotina.id,
+        nome: t.nome,
+        descricao: t.descricao,
+        descanso: t.descanso,
+        cardio: t.cardio ?? null,
+      });
       for (const e of t.exercicios) {
         const exercicio = await obterOuCriarExercicio(e.nome, e.grupoMuscular);
         if (!exercicio.videoUrl && e.videoUrl) await repo.atualizarExercicio(exercicio.id, { videoUrl: e.videoUrl });
@@ -89,6 +101,7 @@ export async function adicionarTreinosNoAparelho(copia: RotinaCopiada[]) {
           preparatoria: e.preparatoria,
           validas: e.validas,
           descansoSeg: e.descansoSeg,
+          cardioMin: e.cardioMin ?? null,
         });
       }
     }

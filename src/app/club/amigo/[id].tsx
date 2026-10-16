@@ -3,7 +3,7 @@ import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
 
-import { AvatarClub, CartaoCheckin } from '@/components/cartao-checkin';
+import { AvatarClub, CartaoCheckin, CheckinsPorDia } from '@/components/cartao-checkin';
 import { useConfirmacao } from '@/components/dialogo-confirmacao';
 import { Botao, Cartao } from '@/components/ui';
 import { mensagemDeErro } from '@/lib/avisos';
@@ -151,14 +151,17 @@ export default function TelaAmigo() {
 
       <Text style={styles.secao}>Check-ins</Text>
       {checkins.length === 0 && <Text style={styles.suave}>Nenhum check-in para mostrar.</Text>}
-      {checkins.map((c) => (
-        <CartaoCheckin
-          key={c.id}
-          checkin={c}
-          urlFoto={c.foto ? fotos.get(c.foto) : undefined}
-          comentarios={comentarios.get(c.id) ?? 0}
-        />
-      ))}
+      <CheckinsPorDia
+        checkins={checkins}
+        renderizar={(c) => (
+          <CartaoCheckin
+            key={c.id}
+            checkin={c}
+            urlFoto={c.foto ? fotos.get(c.foto) : undefined}
+            comentarios={comentarios.get(c.id) ?? 0}
+          />
+        )}
+      />
 
       <Botao titulo="Desfazer amizade" variante="perigo" icone="person-remove-outline" onPress={desfazer} style={styles.desfazer} />
     </ScrollView>

@@ -6,7 +6,7 @@ import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from
 import { Cartao, CriarComNome, Selo } from '@/components/ui';
 import { repo, type Rotina } from '@/db';
 
-type RotinaComTotal = Rotina & { totalTreinos: number; totalDescansos: number };
+type RotinaComTotal = Rotina & { totalTreinos: number; totalDescansos: number; totalCardios: number };
 
 export default function Rotinas() {
   const { colors } = useTheme();
@@ -21,7 +21,8 @@ export default function Rotinas() {
           lista.map(async (r) => {
             const fichas = await repo.listarFichas(r.id);
             const totalDescansos = fichas.filter((f) => f.descanso).length;
-            return { ...r, totalTreinos: fichas.length - totalDescansos, totalDescansos };
+            const totalCardios = fichas.filter((f) => f.cardio).length;
+            return { ...r, totalTreinos: fichas.length - totalDescansos - totalCardios, totalDescansos, totalCardios };
           })
         );
         if (ativo) setRotinas(comTotal);
@@ -61,6 +62,7 @@ export default function Rotinas() {
                 </View>
                 <Text style={[styles.detalhe, { color: colors.text }]}>
                   {r.totalTreinos === 1 ? '1 treino' : `${r.totalTreinos} treinos`}
+                  {r.totalCardios > 0 && ` · ${r.totalCardios === 1 ? '1 cardio' : `${r.totalCardios} cardios`}`}
                   {r.totalDescansos > 0 &&
                     ` · ${r.totalDescansos === 1 ? '1 descanso' : `${r.totalDescansos} descansos`}`}
                 </Text>

@@ -5,8 +5,10 @@ import { useEffect, useState, type ComponentProps } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { Botao, Cartao } from '@/components/ui';
-import { repo, type Serie, type Sessao } from '@/db';
+import { repo, type CardioPlanejado, type Serie, type Sessao } from '@/db';
+import { minutosDaSessao } from '@/lib/cardio';
 import { clubConfigurado } from '@/lib/club';
+import { formatarMinutos } from '@/lib/metas';
 import { voltarAoInicio } from '@/lib/navegacao';
 import { compararEvolucao, formatarDuracao, formatarKg, resumirSeries, type Evolucao } from '@/lib/sessao';
 import { CORES } from '@/lib/tema';
@@ -22,6 +24,10 @@ interface Dados {
   sessao: Sessao;
   series: Serie[];
   exercicios: ExercicioResumo[];
+  /** Plano do dia de cardio, se a sessão foi de cardio. */
+  cardio: CardioPlanejado | null;
+  /** Cardios feitos dentro do treino. */
+  cardiosFeitos: { id: number; nome: string; minutos: number }[];
 }
 
 type Comparacao = { texto: string; tom: 'subiu' | 'primeira' | 'igual' | 'caiu' };
@@ -63,7 +69,17 @@ export default function TelaResumo() {
         if (ativo) setDados('nao-encontrada');
         return;
       }
-      const [series, exercicios] = await Promise.all([repo.listarSeriesDaSessao(sessaoId), repo.listarExercicios()]);
+      const [series, exercicios, ficha, cardios] = await Promise.all([
+        repo.listarSeriesDaSessao(sessaoId),
+        repo.listarExercicios(),
+        sessao.fichaId === null ? null : repo.obterFicha(sessao.fichaId),
+        repo.listarCardiosDaSessao(sessaoId),
+      ]);
+      const cardiosFeitos = cardios.map((c) => ({
+        id: c.id,
+        nome: exercicios.find((e) => e.id === c.exercicioId)?.nome ?? 'Cardio',
+        minutos: c.minutos,
+      }));
       const ids = [...new Set(series.map((s) => s.exercicioId))];
       const resumo = await Promise.all(
         ids.map(async (exercicioId) => {
@@ -77,7 +93,7 @@ export default function TelaResumo() {
           };
         })
       );
-      if (ativo) setDados({ sessao, series, exercicios: resumo });
+      if (ativo) setDados({ sessao, series, exercicios: resumo, cardio: ficha?.cardio ?? null, cardiosFeitos });
     })();
     return () => {
       ativo = false;
@@ -94,7 +110,9 @@ export default function TelaResumo() {
     );
   }
 
-  const { sessao, series, exercicios } = dados;
+  const { sessao, series, exercicios, cardio, cardiosFeitos } = dados;
+  const minutosCardiosFeitos = cardiosFeitos.reduce((t, c) => t + c.minutos, 0);
+  const minutosCardio = minutosDaSessao(sessao);
   const total = resumirSeries(series);
   const comparacoes = exercicios.map((e) => comparar(e.evolucao));
   const evoluiu = comparacoes.filter((c) => c.tom === 'subiu').length;
@@ -113,6 +131,11 @@ export default function TelaResumo() {
         <Text style={styles.subtitulo}>
           Você concluiu <Text style={styles.nomeTreino}>{sessao.nome}</Text>
         </Text>
+        {cardio && (
+          <Text style={styles.manchete}>
+            {minutosCardio >= cardio.minutos ? 'Meta de cardio do dia batida 🔥' : 'Cada minuto conta. Bora!'}
+          </Text>
+        )}
         {comHistorico > 0 && (
           <Text style={styles.manchete}>
             {evoluiu > 0
@@ -122,14 +145,24 @@ export default function TelaResumo() {
         )}
       </View>
 
-      <View style={styles.grade}>
-        <Numero icone="stopwatch-outline" rotulo="Duração" valor={formatarDuracao((sessao.fim ?? sessao.inicio) - sessao.inicio)} />
-        <Numero icone="layers-outline" rotulo="Séries" valor={String(total.series)} />
-        <Numero icone="repeat" rotulo="Repetições" valor={String(total.repeticoes)} />
-        <Numero icone="barbell-outline" rotulo="Peso total" valor={formatarKg(total.volume)} />
-      </View>
+      {cardio ? (
+        <View style={styles.grade}>
+          <Numero icone="stopwatch-outline" rotulo="Duração" valor={formatarDuracao((sessao.fim ?? sessao.inicio) - sessao.inicio)} />
+          <Numero icone="pulse-outline" rotulo="Atividade" valor={cardio.atividade} />
+          <Numero icone="flag-outline" rotulo="Planejado" valor={formatarMinutos(cardio.minutos)} />
+          <Numero icone="flame-outline" rotulo="Na meta da semana" valor={`+${formatarMinutos(minutosCardio)}`} />
+        </View>
+      ) : (
+        <View style={styles.grade}>
+          <Numero icone="stopwatch-outline" rotulo="Duração" valor={formatarDuracao((sessao.fim ?? sessao.inicio) - sessao.inicio)} />
+          <Numero icone="layers-outline" rotulo="Séries" valor={String(total.series)} />
+          <Numero icone="repeat" rotulo="Repetições" valor={String(total.repeticoes)} />
+          <Numero icone="barbell-outline" rotulo="Peso total" valor={formatarKg(total.volume)} />
+        </View>
+      )}
 
-      {clubConfigurado && (
+      {/* Check-in de cardio ainda não existe no Club (ele mostra séries, reps e peso). */}
+      {clubConfigurado && !cardio && (
         <Botao
           titulo="Postar no Club"
           icone="people-outline"
@@ -139,13 +172,34 @@ export default function TelaResumo() {
       )}
       <Botao
         titulo="Voltar ao início"
-        variante={clubConfigurado ? 'secundario' : 'primario'}
+        variante={clubConfigurado && !cardio ? 'secundario' : 'primario'}
         icone="home-outline"
         onPress={voltarAoInicio}
         style={styles.voltar}
       />
 
-      <Text style={styles.secao}>Exercícios</Text>
+      {cardiosFeitos.length > 0 && (
+        <>
+          <Text style={styles.secao}>Cardio</Text>
+          {cardiosFeitos.map((c) => (
+            <Cartao key={c.id} style={styles.cartao}>
+              <View style={styles.evolucao}>
+                <Ionicons name="pulse-outline" size={20} color={CORES.dourado} />
+                <Text style={styles.nome}>{c.nome}</Text>
+              </View>
+              <Text style={styles.detalhe}>{formatarMinutos(c.minutos)}</Text>
+            </Cartao>
+          ))}
+          <View style={styles.evolucao}>
+            <Ionicons name="flame-outline" size={18} color={CORES.dourado} />
+            <Text style={[styles.textoEvolucao, { color: CORES.dourado }]}>
+              +{formatarMinutos(minutosCardiosFeitos)} na meta de cardio da semana
+            </Text>
+          </View>
+        </>
+      )}
+
+      {!cardio && exercicios.length > 0 && <Text style={styles.secao}>Exercícios</Text>}
       {exercicios.map((e, i) => {
         const r = resumirSeries(e.series);
         const c = comparacoes[i];

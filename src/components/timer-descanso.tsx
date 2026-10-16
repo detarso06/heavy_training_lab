@@ -2,11 +2,14 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { useEffect, useRef, useState, type ComponentProps } from 'react';
 import { Platform, Pressable, StyleSheet, Text, Vibration, View } from 'react-native';
 
+import { agendarAvisoDescanso, cancelarAvisoDescanso } from '@/lib/aviso-descanso';
 import { formatarCronometro } from '@/lib/sessao';
 import { CORES } from '@/lib/tema';
 
 interface Props {
   segundos: number;
+  /** Vibrar no fim e avisar por notificação se o app não estiver na tela. */
+  aviso: boolean;
   onFechar: () => void;
   /** Distância do rodapé (área segura do celular). */
   margemInferior: number;
@@ -16,7 +19,7 @@ interface Props {
  * Contagem regressiva do descanso entre séries. Para recomeçar com outro tempo,
  * remonte o componente (mude a `key`).
  */
-export function TimerDescanso({ segundos, onFechar, margemInferior }: Props) {
+export function TimerDescanso({ segundos, aviso, onFechar, margemInferior }: Props) {
   const [total, setTotal] = useState(segundos * 1000);
   const [fimEm, setFimEm] = useState(() => Date.now() + segundos * 1000);
   /** Tempo que faltava quando pausou; nulo enquanto corre. */
@@ -35,9 +38,23 @@ export function TimerDescanso({ segundos, onFechar, margemInferior }: Props) {
   useEffect(() => {
     if (acabou && !avisou.current) {
       avisou.current = true;
-      if (Platform.OS !== 'web') Vibration.vibrate([0, 400, 200, 400]);
+      // Se o fim passou com o app fora da tela, a notificação já avisou: não vibra de novo ao voltar.
+      const agoraMesmo = Date.now() - fimEm < 2000;
+      if (aviso && agoraMesmo && Platform.OS !== 'web') Vibration.vibrate([0, 400, 200, 400]);
     }
-  }, [acabou]);
+  }, [acabou, aviso, fimEm]);
+
+  // Notificação para o fim do descanso; refeita sempre que o fim muda e cancelada ao pausar ou fechar.
+  const correndo = pausadoCom === null;
+  useEffect(() => {
+    if (!aviso || !correndo) return;
+    const agendado = agendarAvisoDescanso(fimEm - Date.now());
+    return () => {
+      agendado.then((id) => {
+        if (id) cancelarAvisoDescanso(id);
+      });
+    };
+  }, [aviso, correndo, fimEm]);
 
   const alternarPausa = () => {
     if (pausadoCom === null) {

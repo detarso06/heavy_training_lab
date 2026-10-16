@@ -15,6 +15,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { BotaoNotificacoes } from '@/components/botao-notificacoes';
 import { BotaoUsuario } from '@/components/botao-usuario';
+import { TreinoEmAndamento } from '@/components/treino-em-andamento';
 import { CORES, TEMA } from '@/lib/tema';
 
 type NomeIcone = ComponentProps<typeof Ionicons>['name'];
@@ -77,7 +78,16 @@ export default function RootLayout() {
             drawerActiveTintColor: CORES.vermelho,
             drawerInactiveTintColor: CORES.texto,
             drawerStyle: { backgroundColor: CORES.fundo },
-          }}>
+          }}
+          // Cartão do treino em andamento por cima de todas as telas (e por baixo do menu aberto).
+          screenLayout={({ route, children }) => (
+            <View style={styles.tela}>
+              {children}
+              <TreinoEmAndamento
+                abaixoDoCabecalho={!TELAS.find((t) => t.name === route.name)?.cabecalhoProprio}
+              />
+            </View>
+          )}>
           {TELAS.map(({ name, titulo, icone, cabecalhoProprio, botaoUsuario, rodape, oculta }) => (
             <Drawer.Screen
               key={name}
@@ -115,6 +125,7 @@ function BotaoVoltar() {
 }
 
 const styles = StyleSheet.create({
+  tela: { flex: 1 },
   cantoDireito: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   voltar: { marginLeft: 16, marginRight: 8 },
   menu: { flex: 1 },
